@@ -1,0 +1,647 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// Creates a terrain from layered Perlin noise, then scatters tree prefabs and
+/// points of interest across its surface.
+///
+/// Add this component to an empty GameObject. By default, generation happens
+/// when entering Play Mode. Keep the generator GameObject's scale at (1, 1, 1).
+/// </summary>
+[DisallowMultipleComponent]
+public class TerrainGenerator : MonoBehaviour
+{
+    [Serializable]
+    public class PointOfInterest
+    {
+        [Tooltip("Optional label to help identify this entry in the Inspector.")]
+        public string label = "POI";
+
+        public GameObject prefab;
+
+        [Min(0)]
+        public int amount = 1;
+
+        [Tooltip("Tilt this prefab to follow the terrain normal. Usually leave this off for buildings.")]
+        public bool alignToTerrain = false;
+
+        [Tooltip("Give each instance a random rotation around the vertical axis.")]
+        public bool randomYaw = true;
+    }
+
+    [Header("Terrain")]
+    [Tooltip("Optional existing Terrain to modify. Leave empty to create one automatically.")]
+    public Terrain terrain;
+
+    [Tooltip("Create a Terrain if the Terrain field is empty.")]
+    public bool createTerrainIfMissing = true;
+
+    [Tooltip("Terrain dimensions in world units (X = width, Y = height, Z = length).")]
+    public Vector3 terrainSize = new Vector3(500f, 60f, 500f);
+
+    [Tooltip("The script converts this to a valid Unity heightmap resolution (power of two + 1).")]
+    [Range(33, 2049)]
+    public int heightmapResolution = 513;
+
+    [Tooltip("Average terrain elevation as a fraction of Terrain height.")]
+    [Range(0f, 0.8f)]
+    public float baseHeight = 0.12f;
+
+    [Tooltip("0 = flat. Increase this for stronger hills. The default is intentionally gentle.")]
+    [Range(0f, 0.6f)]
+    public float hilliness = 0.18f;
+
+    [Tooltip("Approximate world-space size of the broad noise features. Larger values make wider hills.")]
+    [Min(1f)]
+    public float noiseScale = 160f;
+
+    [Range(1, 6)]
+    public int noiseOctaves = 4;
+
+    [Range(0.1f, 0.9f)]
+    public float persistence = 0.5f;
+
+    [Min(1f)]
+    public float lacunarity = 2f;
+
+    [Tooltip("Blend the terrain back toward baseHeight at the outer edges.")]
+    public bool flattenEdges = true;
+
+    [Range(0.01f, 0.25f)]
+    public float edgeBlendWidth = 0.08f;
+
+    [Header("Generation")]
+    [Tooltip("Generate automatically when entering Play Mode.")]
+    public bool generateOnStart = true;
+
+    [Tooltip("The same seed produces the same terrain and placement layout.")]
+    public int seed = 12345;
+
+    [Tooltip("Choose a new seed each time Play Mode starts.")]
+    public bool randomizeSeedOnStart = false;
+
+    [Header("Trees")]
+    [Tooltip("Tree prefabs are selected randomly from this list. Empty entries are ignored.")]
+    public GameObject[] treePrefabs;
+
+    [Min(0)]
+    [Tooltip("Total number of tree instances to try to place, distributed across the tree prefab list.")]
+    public int treeCount = 300;
+
+    [Header("Points of Interest")]
+    [Tooltip("Each entry has its own prefab and amount. POIs are placed before trees to give them priority.")]
+    public PointOfInterest[] pointsOfInterest;
+
+    [Header("Placement Rules")]
+    [Min(0f)]
+    [Tooltip("Minimum spacing between all spawned trees and POIs, in world units.")]
+    public float minimumSpacing = 4f;
+
+    [Range(0f, 60f)]
+    [Tooltip("Objects won't be placed on slopes steeper than this angle.")]
+    public float maxPlacementSlope = 35f;
+
+    [Min(1)]
+    [Tooltip("Random location attempts per object before skipping it. Increase this for dense placement.")]
+    public int attemptsPerObject = 40;
+
+    [Range(0f, 0.2f)]
+    [Tooltip("Keep objects this fraction of the terrain width/length away from the outer border.")]
+    public float placementEdgeMargin = 0.03f;
+
+    [SerializeField, HideInInspector]
+    private Transform generatedObjectsRoot;
+
+    [SerializeField, HideInInspector]
+    private GameObject generatedTerrainObject;
+
+    private readonly List<Vector3> occupiedPositions = new List<Vector3>();
+
+    [Header("Terrain Textures")]
+    [Tooltip("Terrain Layers distributed across the terrain using noise.")]
+    public TerrainLayer[] terrainLayers;
+
+    [Min(1f)]
+    [Tooltip("World-space size of texture patches. Larger values create larger patches.")]
+    public float textureNoiseScale = 90f;
+
+    private void Start()
+    {
+        if (generateOnStart)
+        {
+            GenerateNow();
+        }
+    }
+
+    /// <summary>
+    /// Generates terrain heights and then spawns POIs followed by trees.
+    /// Intended to be called in Play Mode.
+    /// </summary>
+    [ContextMenu("Generate Now (Play Mode)")]
+    public void GenerateNow()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("TerrainGenerator: Enter Play Mode to generate. Generation is runtime-based so it doesn't require editor-only scripts.", this);
+            return;
+        }
+
+        if (randomizeSeedOnStart)
+        {
+            seed = UnityEngine.Random.Range(-1000000, 1000001);
+        }
+
+        if (!EnsureTerrain())
+        {
+            return;
+        }
+
+        EnsureGeneratedObjectsRoot();
+        ClearSpawnedObjects();
+        occupiedPositions.Clear();
+
+        System.Random placementRandom = new System.Random(seed);
+        System.Random noiseRandom = new System.Random(unchecked(seed ^ 0x5F3759DF));
+
+        GenerateHeightmap(noiseRandom);
+
+        // Generate noise-based terrain textures using a separate, deterministic seed.
+        System.Random textureRandom =
+            new System.Random(unchecked(seed ^ 0x2C9277B5));
+
+        GenerateTerrainTextures(textureRandom);
+
+        terrain.Flush();
+
+        int poiPlaced = SpawnPointsOfInterest(placementRandom);
+        int treesPlaced = SpawnTrees(placementRandom);
+
+        Debug.Log(
+            "TerrainGenerator: Generated terrain with seed " + seed + ". Placed " +
+            poiPlaced + " POI(s) and " + treesPlaced + " tree(s).",
+            this);
+    }
+
+    private void GenerateTerrainTextures(System.Random rng)
+    {
+        TerrainData data = terrain.terrainData;
+
+        // Keep only valid Terrain Layer references.
+        List<TerrainLayer> validLayers = new List<TerrainLayer>();
+
+        if (terrainLayers != null)
+        {
+            for (int i = 0; i < terrainLayers.Length; i++)
+            {
+                if (terrainLayers[i] != null)
+                {
+                    validLayers.Add(terrainLayers[i]);
+                }
+            }
+        }
+
+        // Leave existing terrain textures unchanged if none are assigned.
+        if (validLayers.Count == 0)
+        {
+            Debug.LogWarning(
+                "TerrainGenerator: Assign at least one Terrain Layer to generate textures.",
+                this);
+            return;
+        }
+
+        data.terrainLayers = validLayers.ToArray();
+
+        int resolution = data.alphamapResolution;
+        int layerCount = validLayers.Count;
+
+        // Alphamap dimensions are [z, x, layer].
+        float[,,] alphamaps =
+            new float[resolution, resolution, layerCount];
+
+        // One layer means the entire terrain uses that texture.
+        if (layerCount == 1)
+        {
+            for (int z = 0; z < resolution; z++)
+            {
+                for (int x = 0; x < resolution; x++)
+                {
+                    alphamaps[z, x, 0] = 1f;
+                }
+            }
+
+            data.SetAlphamaps(0, 0, alphamaps);
+            return;
+        }
+
+        Vector3 size = data.size;
+
+        // Separate offsets give the texture pattern its own noise layout.
+        float offsetX = rng.Next(-100000, 100000);
+        float offsetZ = rng.Next(-100000, 100000);
+
+        float safeScale = Mathf.Max(1f, textureNoiseScale);
+
+        for (int z = 0; z < resolution; z++)
+        {
+            float worldZ = z / (float)(resolution - 1) * size.z;
+
+            for (int x = 0; x < resolution; x++)
+            {
+                float worldX = x / (float)(resolution - 1) * size.x;
+
+                // Reuse the existing layered Perlin noise function.
+                float noise = FractalNoise(
+                    worldX + offsetX,
+                    worldZ + offsetZ,
+                    safeScale,
+                    Mathf.Clamp(noiseOctaves, 1, 6),
+                    Mathf.Clamp(persistence, 0.1f, 0.9f),
+                    Mathf.Max(1f, lacunarity));
+
+                // Map the noise value to neighboring Terrain Layers.
+                float layerPosition = Mathf.Clamp01(noise) * (layerCount - 1);
+
+                int lowerLayer = Mathf.FloorToInt(layerPosition);
+                int upperLayer = Mathf.Min(lowerLayer + 1, layerCount - 1);
+
+                // Smooth the transition between neighboring textures.
+                float blend = Mathf.SmoothStep(
+                    0f, 1f, layerPosition - lowerLayer);
+
+                alphamaps[z, x, lowerLayer] = 1f - blend;
+                alphamaps[z, x, upperLayer] += blend;
+            }
+        }
+
+        // Apply the texture blending to the Terrain.
+        data.SetAlphamaps(0, 0, alphamaps);
+    }
+
+    [ContextMenu("Clear Spawned Objects")]
+    public void ClearSpawnedObjects()
+    {
+        if (generatedObjectsRoot == null)
+        {
+            Transform found = transform.Find("__GeneratedTerrainObjects");
+            if (found != null)
+            {
+                generatedObjectsRoot = found;
+            }
+        }
+
+        if (generatedObjectsRoot == null)
+        {
+            return;
+        }
+
+        // Iterate backwards because children are removed during the loop.
+        for (int i = generatedObjectsRoot.childCount - 1; i >= 0; i--)
+        {
+            GameObject child = generatedObjectsRoot.GetChild(i).gameObject;
+            if (Application.isPlaying)
+            {
+                Destroy(child);
+            }
+            else
+            {
+                DestroyImmediate(child);
+            }
+        }
+    }
+
+    private bool EnsureTerrain()
+    {
+        if (terrain == null && generatedTerrainObject != null)
+        {
+            terrain = generatedTerrainObject.GetComponent<Terrain>();
+        }
+
+        if (terrain == null)
+        {
+            if (!createTerrainIfMissing)
+            {
+                Debug.LogError("TerrainGenerator: Assign a Terrain or enable 'Create Terrain If Missing'.", this);
+                return false;
+            }
+
+            TerrainData newData = new TerrainData();
+            newData.heightmapResolution = GetValidHeightmapResolution(heightmapResolution);
+            newData.size = GetSafeTerrainSize();
+
+            generatedTerrainObject = Terrain.CreateTerrainGameObject(newData);
+            generatedTerrainObject.name = "Generated Terrain";
+            generatedTerrainObject.transform.position = transform.position;
+            terrain = generatedTerrainObject.GetComponent<Terrain>();
+        }
+        else
+        {
+            TerrainData data = terrain.terrainData;
+            if (data == null)
+            {
+                Debug.LogError("TerrainGenerator: The assigned Terrain has no TerrainData.", this);
+                return false;
+            }
+
+            int validResolution = GetValidHeightmapResolution(heightmapResolution);
+            if (data.heightmapResolution != validResolution)
+            {
+                data.heightmapResolution = validResolution;
+            }
+            data.size = GetSafeTerrainSize();
+        }
+
+        if (terrain == null || terrain.terrainData == null)
+        {
+            Debug.LogError("TerrainGenerator: Failed to create or access TerrainData.", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private Vector3 GetSafeTerrainSize()
+    {
+        return new Vector3(
+            Mathf.Max(1f, terrainSize.x),
+            Mathf.Max(1f, terrainSize.y),
+            Mathf.Max(1f, terrainSize.z));
+    }
+
+    private static int GetValidHeightmapResolution(int requested)
+    {
+        int clamped = Mathf.Clamp(requested, 33, 4097);
+        return Mathf.ClosestPowerOfTwo(clamped - 1) + 1;
+    }
+
+    private void GenerateHeightmap(System.Random noiseRandom)
+    {
+        TerrainData data = terrain.terrainData;
+        int resolution = data.heightmapResolution;
+        float[,] heights = new float[resolution, resolution];
+        Vector3 size = data.size;
+
+        float offsetX = noiseRandom.Next(-100000, 100000);
+        float offsetZ = noiseRandom.Next(-100000, 100000);
+        float safeNoiseScale = Mathf.Max(1f, noiseScale);
+        int octaves = Mathf.Clamp(noiseOctaves, 1, 6);
+        float safePersistence = Mathf.Clamp(persistence, 0.1f, 0.9f);
+        float safeLacunarity = Mathf.Max(1f, lacunarity);
+        float safeBaseHeight = Mathf.Clamp01(baseHeight);
+        float safeHilliness = Mathf.Max(0f, hilliness);
+        float safeEdgeWidth = Mathf.Max(0.001f, edgeBlendWidth);
+
+        for (int z = 0; z < resolution; z++)
+        {
+            float normalizedZ = z / (float)(resolution - 1);
+            float worldZ = normalizedZ * size.z;
+
+            for (int x = 0; x < resolution; x++)
+            {
+                float normalizedX = x / (float)(resolution - 1);
+                float worldX = normalizedX * size.x;
+
+                float noise = FractalNoise(
+                    worldX + offsetX,
+                    worldZ + offsetZ,
+                    safeNoiseScale,
+                    octaves,
+                    safePersistence,
+                    safeLacunarity);
+
+                float edgeFactor = 1f;
+                if (flattenEdges)
+                {
+                    float nearestEdge = Mathf.Min(
+                        Mathf.Min(normalizedX, 1f - normalizedX),
+                        Mathf.Min(normalizedZ, 1f - normalizedZ));
+                    edgeFactor = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(nearestEdge / safeEdgeWidth));
+                }
+
+                float height = safeBaseHeight + ((noise - 0.5f) * safeHilliness * edgeFactor);
+                heights[z, x] = Mathf.Clamp01(height);
+            }
+        }
+
+        data.SetHeights(0, 0, heights);
+    }
+
+    private static float FractalNoise(
+        float x,
+        float z,
+        float scale,
+        int octaves,
+        float persistenceValue,
+        float lacunarityValue)
+    {
+        float amplitude = 1f;
+        float frequency = 1f;
+        float total = 0f;
+        float totalAmplitude = 0f;
+
+        for (int octave = 0; octave < octaves; octave++)
+        {
+            float sampleX = (x / scale) * frequency;
+            float sampleZ = (z / scale) * frequency;
+            total += Mathf.PerlinNoise(sampleX, sampleZ) * amplitude;
+            totalAmplitude += amplitude;
+            amplitude *= persistenceValue;
+            frequency *= lacunarityValue;
+        }
+
+        return totalAmplitude > 0f ? total / totalAmplitude : 0.5f;
+    }
+
+    private int SpawnPointsOfInterest(System.Random rng)
+    {
+        int placed = 0;
+        if (pointsOfInterest == null)
+        {
+            return placed;
+        }
+
+        for (int i = 0; i < pointsOfInterest.Length; i++)
+        {
+            PointOfInterest poi = pointsOfInterest[i];
+            if (poi == null || poi.prefab == null || poi.amount <= 0)
+            {
+                continue;
+            }
+
+            int entryPlaced = 0;
+            for (int j = 0; j < poi.amount; j++)
+            {
+                Vector3 position;
+                float normalizedX;
+                float normalizedZ;
+                if (!TryFindPlacement(rng, out position, out normalizedX, out normalizedZ))
+                {
+                    continue;
+                }
+
+                float yaw = poi.randomYaw ? NextFloat(rng, 0f, 360f) : 0f;
+                Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
+                if (poi.alignToTerrain)
+                {
+                    Vector3 normal = terrain.terrainData.GetInterpolatedNormal(normalizedX, normalizedZ);
+                    rotation = Quaternion.FromToRotation(Vector3.up, normal) * rotation;
+                }
+
+                Instantiate(poi.prefab, position, rotation, generatedObjectsRoot);
+                occupiedPositions.Add(position);
+                entryPlaced++;
+                placed++;
+            }
+
+            if (entryPlaced < poi.amount)
+            {
+                string entryName = string.IsNullOrEmpty(poi.label) ? poi.prefab.name : poi.label;
+                Debug.LogWarning(
+                    "TerrainGenerator: Placed " + entryPlaced + " of " + poi.amount +
+                    " requested instance(s) for POI '" + entryName + "'. Try reducing spacing/slope limits or increasing the attempt count.",
+                    this);
+            }
+        }
+
+        return placed;
+    }
+
+    private int SpawnTrees(System.Random rng)
+    {
+        int placed = 0;
+        if (treePrefabs == null || treePrefabs.Length == 0 || treeCount <= 0)
+        {
+            return placed;
+        }
+
+        List<GameObject> validPrefabs = new List<GameObject>();
+        for (int i = 0; i < treePrefabs.Length; i++)
+        {
+            if (treePrefabs[i] != null)
+            {
+                validPrefabs.Add(treePrefabs[i]);
+            }
+        }
+
+        if (validPrefabs.Count == 0)
+        {
+            return placed;
+        }
+
+        for (int i = 0; i < treeCount; i++)
+        {
+            Vector3 position;
+            float normalizedX;
+            float normalizedZ;
+            if (!TryFindPlacement(rng, out position, out normalizedX, out normalizedZ))
+            {
+                continue;
+            }
+
+            GameObject prefab = validPrefabs[rng.Next(0, validPrefabs.Count)];
+            float yaw = NextFloat(rng, 0f, 360f);
+            Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
+
+            Instantiate(prefab, position, rotation, generatedObjectsRoot);
+            occupiedPositions.Add(position);
+            placed++;
+        }
+
+        if (placed < treeCount)
+        {
+            Debug.LogWarning(
+                "TerrainGenerator: Placed " + placed + " of " + treeCount +
+                " requested trees. Try reducing spacing/slope limits or increasing the attempt count.",
+                this);
+        }
+
+        return placed;
+    }
+
+    private bool TryFindPlacement(
+        System.Random rng,
+        out Vector3 position,
+        out float normalizedX,
+        out float normalizedZ)
+    {
+        TerrainData data = terrain.terrainData;
+        Vector3 terrainPosition = terrain.transform.position;
+        Vector3 size = data.size;
+        float margin = Mathf.Clamp(placementEdgeMargin, 0f, 0.45f);
+        float minDistanceSqr = minimumSpacing * minimumSpacing;
+        int tries = Mathf.Max(1, attemptsPerObject);
+
+        for (int attempt = 0; attempt < tries; attempt++)
+        {
+            normalizedX = NextFloat(rng, margin, 1f - margin);
+            normalizedZ = NextFloat(rng, margin, 1f - margin);
+
+            float worldX = terrainPosition.x + normalizedX * size.x;
+            float worldZ = terrainPosition.z + normalizedZ * size.z;
+            Vector3 candidate = new Vector3(worldX, 0f, worldZ);
+            candidate.y = terrain.SampleHeight(candidate) + terrainPosition.y;
+
+            Vector3 normal = data.GetInterpolatedNormal(normalizedX, normalizedZ);
+            float slope = Vector3.Angle(normal, Vector3.up);
+            if (slope > maxPlacementSlope)
+            {
+                continue;
+            }
+
+            bool tooClose = false;
+            if (minDistanceSqr > 0f)
+            {
+                for (int i = 0; i < occupiedPositions.Count; i++)
+                {
+                    Vector3 delta = candidate - occupiedPositions[i];
+                    delta.y = 0f;
+                    if (delta.sqrMagnitude < minDistanceSqr)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+            }
+
+            if (tooClose)
+            {
+                continue;
+            }
+
+            position = candidate;
+            return true;
+        }
+
+        position = Vector3.zero;
+        normalizedX = 0f;
+        normalizedZ = 0f;
+        return false;
+    }
+
+    private void EnsureGeneratedObjectsRoot()
+    {
+        if (generatedObjectsRoot != null)
+        {
+            return;
+        }
+
+        Transform existing = transform.Find("__GeneratedTerrainObjects");
+        if (existing != null)
+        {
+            generatedObjectsRoot = existing;
+            return;
+        }
+
+        GameObject root = new GameObject("__GeneratedTerrainObjects");
+        root.transform.SetParent(transform, false);
+        root.transform.localPosition = Vector3.zero;
+        root.transform.localRotation = Quaternion.identity;
+        root.transform.localScale = Vector3.one;
+        generatedObjectsRoot = root.transform;
+    }
+
+    private static float NextFloat(System.Random rng, float minInclusive, float maxExclusive)
+    {
+        return minInclusive + (float)rng.NextDouble() * (maxExclusive - minInclusive);
+    }
+}
