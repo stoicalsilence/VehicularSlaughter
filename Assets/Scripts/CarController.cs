@@ -204,6 +204,17 @@ public class CarController : MonoBehaviour
     float localVelocityX;
     bool deceleratingCar;
     bool touchControlsSetup = false;
+
+    // The vehicle can remain active physically while player input is disabled (for example,
+    // when the player exits it). VehicleSeat owns this switch.
+    [SerializeField, Tooltip("When false, keyboard/touch driving input is ignored. Vehicle physics and effects continue.")]
+    private bool playerDrivingEnabled = true;
+
+    public bool PlayerDrivingEnabled => playerDrivingEnabled;
+    public void SetPlayerDrivingEnabled(bool value)
+    {
+        playerDrivingEnabled = value;
+    }
     /*
     The following variables are used to store information about sideways friction of the wheels (such as
     extremumSlip,extremumValue, asymptoteSlip, asymptoteValue and stiffness). We change this values to
@@ -449,9 +460,12 @@ public class CarController : MonoBehaviour
 
         // Resolve the driving inputs once so audio and visual effects work with both keyboard and touch controls.
         bool useTouchInput = useTouchControls && touchControlsSetup;
-        bool forwardInput = useTouchInput ? throttlePTI.buttonPressed : Input.GetKey(KeyCode.W);
-        bool reverseInput = useTouchInput ? reversePTI.buttonPressed : Input.GetKey(KeyCode.S);
-        bool handbrakeInput = useTouchInput ? handbrakePTI.buttonPressed : Input.GetKey(KeyCode.Space);
+        bool forwardInput = playerDrivingEnabled &&
+                            (useTouchInput ? throttlePTI.buttonPressed : Input.GetKey(KeyCode.W));
+        bool reverseInput = playerDrivingEnabled &&
+                            (useTouchInput ? reversePTI.buttonPressed : Input.GetKey(KeyCode.S));
+        bool handbrakeInput = playerDrivingEnabled &&
+                              (useTouchInput ? handbrakePTI.buttonPressed : Input.GetKey(KeyCode.Space));
 
         // Pressing the opposite direction while moving first applies the brakes in this controller.
         bool engineUnderThrottle = (forwardInput && localVelocityZ >= -1f) ||
@@ -493,11 +507,11 @@ public class CarController : MonoBehaviour
                 GoReverse();
             }
 
-            if (turnLeftPTI.buttonPressed)
+            if (playerDrivingEnabled && turnLeftPTI.buttonPressed)
             {
                 TurnLeft();
             }
-            if (turnRightPTI.buttonPressed)
+            if (playerDrivingEnabled && turnRightPTI.buttonPressed)
             {
                 TurnRight();
             }
@@ -544,11 +558,11 @@ public class CarController : MonoBehaviour
                 GoReverse();
             }
 
-            if (Input.GetKey(KeyCode.A))
+            if (playerDrivingEnabled && Input.GetKey(KeyCode.A))
             {
                 TurnLeft();
             }
-            if (Input.GetKey(KeyCode.D))
+            if (playerDrivingEnabled && Input.GetKey(KeyCode.D))
             {
                 TurnRight();
             }
@@ -558,7 +572,7 @@ public class CarController : MonoBehaviour
                 deceleratingCar = false;
                 Handbrake();
             }
-            if (Input.GetKeyUp(KeyCode.Space))
+            if (playerDrivingEnabled && Input.GetKeyUp(KeyCode.Space))
             {
                 RecoverTraction();
             }

@@ -135,6 +135,7 @@ GameObject:
   - component: {fileID: 381760114}
   - component: {fileID: 381760113}
   - component: {fileID: 381760112}
+  - component: {fileID: 381760116}
   m_Layer: 0
   m_Name: Q3Player
   m_TagString: Untagged
@@ -254,6 +255,30 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 3
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &381760116
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 381760111}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a63fb875799a4b042a5e74161ff75645, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerController: {fileID: 381760113}
+  characterController: {fileID: 381760114}
+  playerCamera: {fileID: 525304713}
+  playerAudioListener: {fileID: 525304714}
+  interactKey: 101
+  interactionRadius: 3
+  vehicleLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  maxExitSpeedKmh: 3
+  enterPrompt: {fileID: 0}
+  exitPrompt: {fileID: 0}
 --- !u!1 &455704392
 GameObject:
   m_ObjectHideFlags: 0

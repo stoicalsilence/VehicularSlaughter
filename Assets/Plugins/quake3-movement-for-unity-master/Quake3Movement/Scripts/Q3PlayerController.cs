@@ -540,6 +540,22 @@ namespace Q3Movement
                 m_MovementAudioSource.PlayOneShot(m_JumpClip, m_JumpVolume);
         }
 
+        public void ResetMovementState()
+        {
+            m_PlayerVelocity = Vector3.zero;
+            m_MoveDirectionNorm = Vector3.zero;
+            m_MoveInput = Vector3.zero;
+            m_GroundNormal = Vector3.up;
+            m_IsGrounded = false;
+            m_OnSteepSlope = false;
+            m_GroundGap = float.PositiveInfinity;
+            m_JumpBufferTimer = 0f;
+            m_TimeSinceGrounded = 999f;
+            m_JumpGroundLockTimer = 0f;
+            m_FootstepDistanceTravelled = 0f;
+        }
+
+
         private void ApplyGroundFriction(float frictionScale, float dt)
         {
             Vector3 surfaceVelocity = Vector3.ProjectOnPlane(m_PlayerVelocity, m_GroundNormal);
