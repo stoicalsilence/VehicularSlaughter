@@ -4,15 +4,6 @@ using DG.Tweening;
 using UnityEngine;
 
 /// <summary>
-/// Optional interface for enemies that receive turret damage.
-/// If not implemented, the turret falls back to SendMessageUpwards.
-/// </summary>
-public interface ITurretDamageable
-{
-    void TakeDamage(float damage);
-}
-
-/// <summary>
 /// Autonomous hitscan turret for a 3D horde shooter.
 /// Requires DOTween.
 /// Uses one assigned LineRenderer for bullet tracers.
@@ -23,18 +14,48 @@ public class TurretGun : MonoBehaviour
     [Tooltip("Transform that rotates to aim and moves into the reload pose.")]
     public Transform GunVisual;
 
-    [Tooltip("Origin of bullets and muzzle flash.")]
     [SerializeField] private Transform muzzlePoint;
-
     [SerializeField] private GameObject muzzleFlash;
-
-    [Tooltip("Assign a LineRenderer component directly. No prefab required.")]
     [SerializeField] private LineRenderer bulletTracer;
 
-    [Header("Targeting")]
+
+    [Header("UPGRADE STATS")]
+    [Space(5)]
+
+    [Header("Offensive Stats")]
+    [Min(0f)]
+    [SerializeField] private float damagePerShot = 10f;
+
+    [Tooltip("Knockback force applied to enemies hit by this turret.")]
+    [Min(0f)]
+    [SerializeField] private float knockbackForce = 5f;
+
+    [Tooltip("Shots fired per second.")]
+    [Min(0.01f)]
+    [SerializeField] private float fireRate = 6f;
+
+    [Tooltip("Accuracy spread in degrees.")]
+    [Range(0f, 20f)]
+    [SerializeField] private float accuracySpreadDegrees = 1.25f;
+
+
+    [Header("Magazine Stats")]
+    [Min(1)]
+    [SerializeField] private int magazineSize = 30;
+
+    [Min(0.01f)]
+    [SerializeField] private float reloadTime = 2.2f;
+
+
+    [Header("Range Stats")]
     [Min(0f)]
     [SerializeField] private float detectionRange = 20f;
 
+    [Min(0.1f)]
+    [SerializeField] private float maxShotDistance = 40f;
+
+
+    [Header("Targeting")]
     [Min(0.01f)]
     [SerializeField] private float targetScanInterval = 0.15f;
 
@@ -43,10 +64,10 @@ public class TurretGun : MonoBehaviour
     [SerializeField] private bool requireEnemyTag;
     [SerializeField] private string enemyTag = "Enemy";
 
-    [SerializeField]
-    private Vector3 targetAimOffset = new Vector3(0f, 1.2f, 0f);
+    [SerializeField] private Vector3 targetAimOffset = new Vector3(0f, 1.2f, 0f);
 
     [SerializeField] private bool markedTargetMustBeInRange;
+
 
     [Header("Aiming (DOTween)")]
     [Min(0.01f)]
@@ -64,39 +85,22 @@ public class TurretGun : MonoBehaviour
 
     [SerializeField] private Ease aimEase = Ease.OutSine;
 
-    [Header("Weapon")]
-    [Min(0f)]
-    [SerializeField] private float damagePerShot = 10f;
 
-    [Tooltip("Shots fired per second.")]
-    [Min(0.01f)]
-    [SerializeField] private float fireRate = 6f;
-
-    [Range(0f, 20f)]
-    [SerializeField] private float accuracySpreadDegrees = 1.25f;
-
-    [Min(0.1f)]
-    [SerializeField] private float maxShotDistance = 40f;
-
+    [Header("Weapon Settings")]
     [Tooltip("Layers that can stop a shot. Include enemies and world geometry.")]
     [SerializeField] private LayerMask shotLayers = ~0;
 
     [SerializeField] private string damageMessage = "TakeDamage";
 
-    [Header("Magazine / Reload")]
-    [Min(1)]
-    [SerializeField] private int magazineSize = 30;
 
-    [Min(0.01f)]
-    [SerializeField] private float reloadTime = 2.2f;
-
+    [Header("Reload Animation")]
     [Min(0.01f)]
     [SerializeField] private float reloadPoseTransitionTime = 0.2f;
 
-    [SerializeField]
-    private Vector3 reloadLocalEulerAngles = new Vector3(25f, 180f, 0f);
+    [SerializeField] private Vector3 reloadLocalEulerAngles = new Vector3(25f, 180f, 0f);
 
     [SerializeField] private Ease reloadPoseEase = Ease.InOutSine;
+
 
     [Header("Muzzle Flash")]
     [Min(0.01f)]
@@ -104,24 +108,25 @@ public class TurretGun : MonoBehaviour
 
     [SerializeField] private Vector2 muzzleFlashRandomX = new Vector2(0f, 360f);
 
+
     [Header("Bullet Tracer")]
     [Min(0.01f)]
     [SerializeField] private float tracerLifetime = 0.07f;
 
+
     [Header("Bullet Casings")]
     [SerializeField] private GameObject casingPrefab;
-
     [SerializeField] private Transform casingEjectPoint;
 
     [Min(0.1f)]
     [SerializeField] private float casingLifetime = 4f;
 
     [SerializeField] private Vector2 casingSideForce = new Vector2(1.2f, 2.4f);
-
     [SerializeField] private Vector2 casingUpForce = new Vector2(0.5f, 1.2f);
 
     [Min(0f)]
     [SerializeField] private float casingRandomTorque = 8f;
+
 
     [Header("Audio")]
     [SerializeField] private AudioClip fireSound;
@@ -130,7 +135,6 @@ public class TurretGun : MonoBehaviour
     [SerializeField] private float fireSoundVolume = 1f;
 
     [SerializeField] private AudioClip dirtImpactSound;
-    [SerializeField] private AudioClip metalImpactSound;
 
     public GameObject metalSparkParticles;
     public GameObject dirtSparkParticles;
@@ -538,11 +542,6 @@ public class TurretGun : MonoBehaviour
             {
                 GameObject sparks = Instantiate(metalSparkParticles, hit.point, Quaternion.identity);
                 Destroy(sparks, 5);
-
-                AudioManager.Play3D(
-                    metalImpactSound,
-                    hit.point,
-                    impactSoundVolume, 1, 20, 50);
             }
             else
             {
@@ -605,11 +604,15 @@ public class TurretGun : MonoBehaviour
 
         if (damageable != null)
         {
-            damageable.TakeDamage(damagePerShot);
+            damageable.TakeDamage(
+                damagePerShot,
+                hit.point,
+                knockbackForce);
+
             return;
         }
 
-        // Fallback for existing enemy scripts.
+        // Fallback for objects that only support ordinary damage.
         hit.collider.SendMessageUpwards(
             damageMessage,
             damagePerShot,
