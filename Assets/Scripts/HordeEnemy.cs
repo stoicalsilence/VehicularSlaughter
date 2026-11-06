@@ -31,6 +31,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     [Range(0f, 1f)]
     [SerializeField] private float minimumClimbUpDot = 0.45f;
 
+    public XPBlobPool xpBlobPool;
+    [SerializeField] private float xpDropValue = 10f;
+
     // Components
     private Rigidbody rb;
     private CapsuleCollider capsule;
@@ -102,8 +105,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
 
     [Header("Death")]
-    [SerializeField]
-    private GameObject deathParticlesPrefab;
+    public DeathParticlePool deathParticlePool;
 
     [SerializeField]
     private AudioClip deathSound;
@@ -127,6 +129,31 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private float knockbackTimer;
 
+    [Header("Vehicle Impact")]
+    [SerializeField]
+    [Tooltip("When disabled, this enemy cannot be damaged or pushed by the car, but it can still damage the car on impact.")]
+    private bool canBeRunOver = true;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("Scales damage received from the car. Lower values make this enemy harder to run over.")]
+    private float vehicleDamageMultiplier = 1f;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("Scales knockback received from the car, before the general knockback resistance is applied.")]
+    private float vehicleKnockbackMultiplier = 1f;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("Scales how much this enemy damages the car when hit. Use higher values for armored/heavy enemies.")]
+    private float vehicleImpactCarDamageMultiplier = 1f;
+
+    [SerializeField, Min(0.05f)]
+    [Tooltip("Prevents multiple colliders or repeated contacts from applying several vehicle hits in quick succession.")]
+    private float vehicleHitCooldown = 0.4f;
+
+    private float nextVehicleHitTime;
+
+    public float VehicleImpactCarDamageMultiplier => vehicleImpactCarDamageMultiplier;
+
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -143,7 +170,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         if (rb == null)
             return;
 
+        knockbackTimer = 0f;
+        wallNormal = Vector3.zero;
+        climbForward = Vector3.zero;
+
         isClimbing = false;
+        nextVehicleHitTime = 0f;
 
         rb.useGravity = defaultGravity;
 
@@ -162,15 +194,10 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     private void OnDisable()
     {
         if (HordeManager.Instance != null)
-        {
             HordeManager.Instance.UnregisterEnemy(this);
-        }
 
-        if (rb != null)
-        {
-            isClimbing = false;
-            rb.useGravity = defaultGravity;
-        }
+        StopHitFlash(true);
+        ResetMovementState();
     }
 
     // Called by HordeManager only.
@@ -508,17 +535,29 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     // POOL SUPPORT
     // ------------------------------------------------
 
+    private void ResetMovementState()
+    {
+        isClimbing = false;
+
+        wallNormal = Vector3.zero;
+        climbForward = Vector3.zero;
+
+        nextVehicleHitTime = 0f;
+        knockbackTimer = 0f;
+        simulationTimer = 0f;
+
+        if (rb == null)
+            return;
+
+        rb.useGravity = defaultGravity;
+        rb.velocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+    }
+
     public void PrepareForPool()
     {
         StopHitFlash(true);
-
-        isClimbing = false;
-        rb.useGravity = defaultGravity;
-
-        Velocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
-
-        simulationTimer = 0f;
+        ResetMovementState();
     }
 
     public void ResetForSpawn()
@@ -528,11 +567,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         currentHealth = maxHealth;
         isDead = false;
 
-        isClimbing = false;
-        rb.useGravity = defaultGravity;
-
-        Velocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
+        ResetMovementState();
 
         simulationTimer = Random.Range(0f, 0.2f);
     }
@@ -541,6 +576,39 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public void TakeDamage(float damage)
     {
         ApplyDamage(damage);
+    }
+
+    /// <summary>
+    /// Applies a car impact. Returns true when this enemy accepted the impact,
+    /// including enemies configured as too heavy to be run over.
+    /// </summary>
+    public bool ReceiveVehicleImpact(
+        float damage,
+        Vector3 impactPosition,
+        float knockbackForce)
+    {
+        if (isDead || Time.time < nextVehicleHitTime)
+            return false;
+
+        nextVehicleHitTime = Time.time + Mathf.Max(0.05f, vehicleHitCooldown);
+
+        // Heavy/anchored enemies still punish the vehicle, but cannot be run over.
+        if (!canBeRunOver)
+            return true;
+
+        float finalDamage = Mathf.Max(0f, damage) * Mathf.Max(0f, vehicleDamageMultiplier);
+        ApplyDamage(finalDamage);
+
+        // ApplyDamage may have killed and despawned the enemy.
+        if (!isDead && knockbackForce > 0f)
+        {
+            float finalKnockback =
+                knockbackForce * Mathf.Max(0f, vehicleKnockbackMultiplier);
+
+            ApplyKnockback(impactPosition, finalKnockback);
+        }
+
+        return true;
     }
 
     // Damage with explicitly requested knockback.
@@ -607,11 +675,11 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         AudioClip soundToPlay = hitSound;
 
-        if(altHitSound != null)
+        if (altHitSound != null)
         {
             int r = Random.Range(0, 100);
 
-            if(r < 50)
+            if (r < 50)
             {
                 soundToPlay = altHitSound;
             }
@@ -756,16 +824,10 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         StopHitFlash(true);
 
-        // Spawn independent death particles.
-        if (deathParticlesPrefab != null)
+        // Spawn pooled death particles.
+        if (deathParticlePool != null)
         {
-            GameObject particles = Instantiate(
-                deathParticlesPrefab,
-                transform.position,
-                Quaternion.identity
-            );
-
-            Destroy(particles,5);
+            deathParticlePool.Play(transform.position);
         }
 
         // Play 3D death audio.
@@ -778,6 +840,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             );
         }
 
+        DropXP();
+
         // Return the enemy to the HordeManager pool.
         if (HordeManager.Instance != null)
         {
@@ -788,4 +852,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             Destroy(gameObject);
         }
     }
+    private void DropXP()
+    {
+        xpBlobPool.Spawn(transform.position, xpDropValue);
+    }
+
 }

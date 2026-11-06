@@ -164,6 +164,50 @@ public class CarController : MonoBehaviour
 
     float nextCrashEffectTime;
 
+    // VEHICLE DURABILITY AND HORDE IMPACTS
+    [Space(20)]
+    [Header("VEHICLE DURABILITY / ENEMY IMPACTS")]
+    [SerializeField] private bool enableVehicleImpactSystem = true;
+
+    [SerializeField, Min(1f)]
+    [Tooltip("The car is wrecked when this reaches zero.")]
+    public float maxVehicleHealth = 100f;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("The car must be travelling toward an enemy at least this fast to damage or push it. In km/h.")]
+    private float minimumRunOverSpeedKmh = 18f;
+
+    [SerializeField, Min(1f)]
+    [Tooltip("Speed at which enemy damage, knockback and car damage reach their maximum values. In km/h.")]
+    private float maximumImpactSpeedKmh = 70f;
+
+    [SerializeField, Min(0f)]
+    private float minimumEnemyDamage = 10f;
+
+    [SerializeField, Min(0f)]
+    private float maximumEnemyDamage = 36f;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("Knockback is a Rigidbody velocity change in metres per second.")]
+    private float minimumEnemyKnockback = 2f;
+
+    [SerializeField, Min(0f)]
+    private float maximumEnemyKnockback = 9f;
+
+    [SerializeField, Min(0f)]
+    private float minimumVehicleDamagePerHit = 1f;
+
+    [SerializeField, Min(0f)]
+    private float maximumVehicleDamagePerHit = 10f;
+
+    public float currentVehicleHealth;
+    public bool vehicleWrecked;
+
+    public bool IsVehicleWrecked => vehicleWrecked;
+
+    // Subscribe from a HUD or game manager if you want to display vehicle health.
+    public event Action<float, float> VehicleHealthChanged;
+
     //CONTROLS
 
     [Space(20)]
@@ -197,6 +241,7 @@ public class CarController : MonoBehaviour
     IMPORTANT: The following variables should not be modified manually since their values are automatically given via script.
     */
     Rigidbody carRigidbody; // Stores the car's rigidbody.
+    Vector3 velocityBeforePhysicsStep;
     float steeringAxis; // Used to know whether the steering wheel has reached the maximum value. It goes from -1 to 1.
     float throttleAxis; // Used to know whether the throttle has reached the maximum value. It goes from -1 to 1.
     float driftingAxis;
@@ -237,6 +282,11 @@ public class CarController : MonoBehaviour
         //in the inspector.
         carRigidbody = gameObject.GetComponent<Rigidbody>();
         carRigidbody.centerOfMass = bodyMassCenter;
+
+        maxVehicleHealth = Mathf.Max(1f, maxVehicleHealth);
+        currentVehicleHealth = maxVehicleHealth;
+        vehicleWrecked = false;
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
 
         //Initial setup to calculate the drift value of the car. This part could look a bit
         //complicated, but do not be afraid, the only thing we're doing here is to save the default
@@ -359,13 +409,17 @@ public class CarController : MonoBehaviour
 
     }
 
-    // Detect collisions and select crash effects based on relative impact speed.
+    // Handle enemy gameplay impacts separately from optional crash VFX/audio.
     void OnCollisionEnter(Collision collision)
     {
-        if (!useCrashEffects || collision == null)
-        {
+        if (collision == null)
             return;
-        }
+
+        HandleEnemyImpact(collision);
+
+        // Crash effects are cosmetic and must not control whether gameplay damage runs.
+        if (!useCrashEffects)
+            return;
 
         // Ignore layers that are not included in the crash mask.
         if ((crashLayerMask.value & (1 << collision.gameObject.layer)) == 0)
@@ -421,6 +475,128 @@ public class CarController : MonoBehaviour
         nextCrashEffectTime = Time.time + Mathf.Max(0f, crashCooldown);
     }
 
+    // Also evaluate ongoing contact. This catches the case where the car first
+    // touches an enemy below the run-over threshold, then accelerates while still
+    // in contact. The enemy's vehicleHitCooldown prevents per-frame damage.
+    void OnCollisionStay(Collision collision)
+    {
+        if (collision == null)
+            return;
+
+        HandleEnemyImpact(collision);
+    }
+
+    private void HandleEnemyImpact(Collision collision)
+    {
+        if (!enableVehicleImpactSystem || carRigidbody == null)
+            return;
+
+        // The enemy script may live on a parent while the collider is on a child.
+        HordeEnemy enemy = collision.collider != null
+            ? collision.collider.GetComponentInParent<HordeEnemy>()
+            : null;
+
+        if (enemy == null || enemy.IsDead)
+            return;
+
+        // Use the car's actual world velocity, not WheelCollider RPM. The dot product
+        // rejects glancing side-swipes and collisions where the car is moving away.
+        Vector3 toEnemy = enemy.transform.position - carRigidbody.worldCenterOfMass;
+        toEnemy = Vector3.ProjectOnPlane(toEnemy, Vector3.up);
+
+        if (toEnemy.sqrMagnitude < 0.001f)
+        {
+            toEnemy = Vector3.ProjectOnPlane(velocityBeforePhysicsStep, Vector3.up);
+            if (toEnemy.sqrMagnitude < 0.001f)
+                toEnemy = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        }
+
+        toEnemy.Normalize();
+
+        // Cached in FixedUpdate before the solver applies this collision's impulse.
+        Vector3 horizontalCarVelocity =
+            Vector3.ProjectOnPlane(velocityBeforePhysicsStep, Vector3.up);
+
+        // Only count the component of the car's speed travelling into this enemy.
+        float speedTowardEnemyKmh =
+            Vector3.Dot(horizontalCarVelocity, toEnemy) * 3.6f;
+
+        float minimumSpeed = Mathf.Max(0f, minimumRunOverSpeedKmh);
+        if (speedTowardEnemyKmh < minimumSpeed)
+            return;
+
+        float maximumSpeed = Mathf.Max(minimumSpeed + 0.01f, maximumImpactSpeedKmh);
+        float impact01 = Mathf.InverseLerp(minimumSpeed, maximumSpeed, speedTowardEnemyKmh);
+
+        float enemyDamage = Mathf.Lerp(
+            Mathf.Max(0f, minimumEnemyDamage),
+            Mathf.Max(0f, maximumEnemyDamage),
+            impact01);
+
+        float enemyKnockback = Mathf.Lerp(
+            Mathf.Max(0f, minimumEnemyKnockback),
+            Mathf.Max(0f, maximumEnemyKnockback),
+            impact01);
+
+        Vector3 impactPoint = transform.position;
+        if (collision.contactCount > 0)
+            impactPoint = collision.GetContact(0).point;
+
+        // The enemy owns its per-target cooldown and applies its own resistance/type multipliers.
+        bool registeredHit = enemy.ReceiveVehicleImpact(
+            enemyDamage,
+            impactPoint,
+            enemyKnockback);
+
+        if (!registeredHit)
+            return;
+
+        float vehicleDamage = Mathf.Lerp(
+            Mathf.Max(0f, minimumVehicleDamagePerHit),
+            Mathf.Max(0f, maximumVehicleDamagePerHit),
+            impact01);
+
+        vehicleDamage *= Mathf.Max(0f, enemy.VehicleImpactCarDamageMultiplier);
+        ApplyVehicleDamage(vehicleDamage);
+    }
+
+    private void ApplyVehicleDamage(float damage)
+    {
+        if (!enableVehicleImpactSystem || vehicleWrecked || damage <= 0f)
+            return;
+
+        currentVehicleHealth = Mathf.Max(0f, currentVehicleHealth - damage);
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
+
+        if (currentVehicleHealth <= 0f && !vehicleWrecked)
+        {
+            vehicleWrecked = true;
+            OnVehicleHealthDepleted();
+        }
+    }
+
+    /// <summary>Restores vehicle health. A positive repair can bring a wrecked car back into service.</summary>
+    public void RepairVehicle(float amount)
+    {
+        if (!enableVehicleImpactSystem || amount <= 0f)
+            return;
+
+        currentVehicleHealth = Mathf.Min(maxVehicleHealth, currentVehicleHealth + amount);
+        if (currentVehicleHealth > 0f)
+            vehicleWrecked = false;
+
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
+    }
+
+    /// <summary>
+    /// Called once when vehicle health first reaches zero.
+    /// Intentionally empty: reaching zero health does not currently change driving.
+    /// </summary>
+    private void OnVehicleHealthDepleted()
+    {
+        // TODO: Add vehicle destruction behaviour here if desired in the future.
+    }
+
     void PlayCrashEffects(ParticleSystem particlePrefab, AudioClip sound, Vector3 impactPoint, Vector3 impactNormal)
     {
         if (particlePrefab != null)
@@ -443,6 +619,13 @@ public class CarController : MonoBehaviour
             AudioManager.Play3D(sound, impactPoint, crashSoundVolume);
             //AudioSource.PlayClipAtPoint(sound, impactPoint, crashSoundVolume);
         }
+    }
+
+    // Cache the pre-solver velocity so OnCollisionEnter can evaluate the actual approach speed.
+    void FixedUpdate()
+    {
+        if (carRigidbody != null)
+            velocityBeforePhysicsStep = carRigidbody.velocity;
     }
 
     // Update is called once per frame
@@ -864,11 +1047,12 @@ public class CarController : MonoBehaviour
             ReleaseBrakes();
             if (Mathf.RoundToInt(carSpeed) < maxSpeed)
             {
-                //Apply positive torque in all wheels to go forward if maxSpeed has not been reached.
-                frontLeftCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                frontRightCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                rearLeftCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                rearRightCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
+                // Vehicle health never modifies the driving response.
+                float motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
+                frontLeftCollider.motorTorque = motorTorque;
+                frontRightCollider.motorTorque = motorTorque;
+                rearLeftCollider.motorTorque = motorTorque;
+                rearRightCollider.motorTorque = motorTorque;
             }
             else
             {
@@ -918,11 +1102,12 @@ public class CarController : MonoBehaviour
             ReleaseBrakes();
             if (Mathf.Abs(Mathf.RoundToInt(carSpeed)) < maxReverseSpeed)
             {
-                //Apply negative torque in all wheels to go in reverse if maxReverseSpeed has not been reached.
-                frontLeftCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                frontRightCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                rearLeftCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
-                rearRightCollider.motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
+                // Vehicle health never modifies the driving response.
+                float motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
+                frontLeftCollider.motorTorque = motorTorque;
+                frontRightCollider.motorTorque = motorTorque;
+                rearLeftCollider.motorTorque = motorTorque;
+                rearRightCollider.motorTorque = motorTorque;
             }
             else
             {
