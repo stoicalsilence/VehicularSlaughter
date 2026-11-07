@@ -564,7 +564,7 @@ public class TurretGun : MonoBehaviour
             AudioManager.Play3D(
                 fireSound,
                 shotOrigin,
-                fireSoundVolume);
+                fireSoundVolume, 1, 1, 50);
         }
 
         currentAmmo = Mathf.Max(0, currentAmmo - 1);
