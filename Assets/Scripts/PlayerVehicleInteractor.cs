@@ -37,6 +37,8 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     private bool previousPlayerCameraEnabled;
     private bool previousPlayerAudioListenerEnabled;
 
+    public GameObject crosshair;
+
     public bool IsInVehicle => currentVehicle != null;
     public VehicleSeat NearbyVehicle => nearbyVehicle;
     public VehicleSeat CurrentVehicle => currentVehicle;
@@ -161,6 +163,8 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         currentVehicle = seat;
         nearbyVehicle = null;
 
+        crosshair.SetActive(false);
+
         SetPromptActive(enterPrompt, false);
         SetPromptActive(exitPrompt, true);
     }
@@ -204,6 +208,8 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             playerController.SendMessage("ResetMovementState", SendMessageOptions.DontRequireReceiver);
             playerController.enabled = previousPlayerControllerEnabled;
         }
+
+        crosshair.SetActive(true);
 
         SetPromptActive(enterPrompt, false);
         SetPromptActive(exitPrompt, false);
