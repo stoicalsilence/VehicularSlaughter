@@ -5,6 +5,9 @@ using UnityEngine;
 /// First-person hitscan weapon for the on-foot player.
 /// Weapon behaviour is defined by stats rather than weapon-specific classes:
 /// pellets + spread can create a shotgun, high fire rate can create an SMG, etc.
+///
+/// The Animator should be on the first-person arms root, with the weapon beneath it,
+/// so one set of clips animates the arms and weapon together.
 /// Requires DOTween and the project's ITurretDamageable / AudioManager systems.
 /// </summary>
 [DisallowMultipleComponent]
@@ -17,13 +20,14 @@ public sealed class PlayerGun : MonoBehaviour
     [Tooltip("Used to prevent firing/reloading while the player occupies a vehicle.")]
     [SerializeField] private PlayerVehicleInteractor vehicleInteractor;
 
+    [Tooltip("Animator on the first-person arms root. The weapon should be a child of the animated rig.")]
+    [SerializeField] private Animator weaponAnimator;
+
     [Tooltip("Optional muzzle position. If empty, shots originate from the camera.")]
     [SerializeField] private Transform muzzlePoint;
 
-    [Tooltip("Optional weapon model transform animated during reloads.")]
-    [SerializeField] private Transform weaponVisual;
-
     [SerializeField] private GameObject muzzleFlash;
+
 
     [Header("Offensive Stats")]
     [Min(0f)]
@@ -47,23 +51,27 @@ public sealed class PlayerGun : MonoBehaviour
     [Tooltip("When enabled, holding the fire button repeats shots. Disable for semi-automatic weapons.")]
     [SerializeField] private bool automaticFire = true;
 
+
     [Header("Magazine Stats")]
     [Min(1)]
-    [SerializeField] private int magazineSize = 30;
+    [SerializeField] public int magazineSize = 30;
 
     [Min(0.01f)]
     [SerializeField] private float reloadDuration = 2.2f;
 
     [SerializeField] private bool reloadAutomaticallyWhenEmpty = true;
 
+
     [Header("Range Stats")]
     [Min(0.1f)]
     [SerializeField] private float maxShotDistance = 60f;
+
 
     [Header("Input")]
     [Range(0, 2)]
     [SerializeField] private int fireMouseButton = 0;
     [SerializeField] private KeyCode reloadKey = KeyCode.R;
+
 
     [Header("Hit Detection")]
     [Tooltip("Layers that can be hit by shots. Exclude the player and weapon layers to prevent self-hits.")]
@@ -73,6 +81,7 @@ public sealed class PlayerGun : MonoBehaviour
     [SerializeField] private LayerMask metalImpactLayers = 1 << 7;
 
     [SerializeField] private string damageMessage = "TakeDamage";
+
 
     [Header("Impact Effects")]
     [SerializeField] private GameObject metalImpactParticles;
@@ -86,20 +95,39 @@ public sealed class PlayerGun : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float impactSoundVolume = 0.8f;
 
-    [Header("Reload Animation")]
-    [Tooltip("How long each transition into and out of the reload pose takes. The remaining reload time is spent holding the pose. The complete animation always matches Reload Duration.")]
-    [Min(0.01f)]
-    [SerializeField] private float reloadPoseTransitionTime = 0.2f;
 
-    [SerializeField] private Vector3 reloadLocalPosition = new Vector3(0f, -0.12f, -0.08f);
-    [SerializeField] private Vector3 reloadLocalEulerAngles = new Vector3(25f, 0f, 0f);
-    [SerializeField] private Ease reloadPoseEase = Ease.InOutSine;
+    [Header("Weapon Animation")]
+    [Tooltip("Full Animator state path, usually 'Base Layer.Idle'. This should be the default looping state.")]
+    [SerializeField] private AnimationClip idleAnim;
+
+    [Tooltip("Full Animator state path, usually 'Base Layer.Fire'. This should be a non-looping one-shot state that returns to Idle.")]
+    [SerializeField] private AnimationClip shootAnim;
+
+    [Tooltip("Full Animator state path, usually 'Base Layer.Reload'. PlayerGun returns to Idle when the gameplay reload timer completes.")]
+    [SerializeField] private AnimationClip reloadAnim;
+
+    [Tooltip("Animator layer containing the Idle, Fire and Reload states. Usually 0 (Base Layer).")]
+    [Min(0)]
+    [SerializeField] private int animatorLayer = 0;
+
+    [Tooltip("Blend time used when entering Fire or Reload and when returning to Idle.")]
+    [Min(0f)]
+    [SerializeField] private float animationBlendTime = 0.04f;
+
+    [Tooltip("The reload clip's duration in seconds when played at 1x speed. Set this to the actual reload clip length.")]
+    [Min(0.01f)]
+    [SerializeField] private float reloadAnimationReferenceDuration = 2.2f;
+
+    [Tooltip("Float parameter used as the Reload state's Speed Multiplier. Create this as a Float in the Animator Controller.")]
+    [SerializeField] private string reloadSpeedParameter = "ReloadSpeed";
+
 
     [Header("Muzzle Flash")]
     [Min(0.01f)]
     [SerializeField] private float muzzleFlashDuration = 0.06f;
 
     [SerializeField] private Vector2 muzzleFlashRandomX = new Vector2(0f, 360f);
+
 
     [Header("Bullet Casings")]
     [SerializeField] private GameObject casingPrefab;
@@ -114,16 +142,25 @@ public sealed class PlayerGun : MonoBehaviour
     [Min(0f)]
     [SerializeField] private float casingRandomTorque = 8f;
 
+
     [Header("Audio")]
     [SerializeField] private AudioClip fireSound;
 
     [Range(0f, 1f)]
     [SerializeField] private float fireSoundVolume = 1f;
 
+    [Tooltip("Played by the PlayReloadSound animation event, not automatically at reload start.")]
     [SerializeField] private AudioClip reloadSound;
+
+    [Tooltip("Optional sounds called by animation events on the arms Animator.")]
+    [SerializeField] private AudioClip magazineOutSound;
+    [SerializeField] private AudioClip magazineInSound;
+    [SerializeField] private AudioClip boltActionSound;
+    [SerializeField] private AudioClip shellInsertSound;
 
     [Range(0f, 1f)]
     [SerializeField] private float reloadSoundVolume = 0.8f;
+
 
     // Runtime state.
     private int currentAmmo;
@@ -131,18 +168,30 @@ public sealed class PlayerGun : MonoBehaviour
     private float nextShotTime;
     private float muzzleFlashOffTime;
 
-    private Vector3 weaponDefaultLocalPosition;
-    private Vector3 weaponDefaultLocalEulerAngles;
-    private bool hasWeaponDefaultPose;
-
     private Sequence reloadSequence;
+
+    // Cached Animator data.
+    private int idleStateHash;
+    private int fireStateHash;
+    private int reloadStateHash;
+    private int reloadSpeedParameterHash;
+
+    private bool hasIdleState;
+    private bool hasFireState;
+    private bool hasReloadState;
+    private bool hasReloadSpeedParameter;
+
+    private float originalAnimatorSpeed = 1f;
+    private bool usingAnimatorSpeedFallback;
+
 
     public int CurrentAmmo => currentAmmo;
     public bool IsReloading => isReloading;
+    public int MagazineSize => magazineSize;
     public bool CanFire => CanUseWeapon && !isReloading && currentAmmo > 0;
 
+
     // Read/write stat properties let a future upgrade system change the weapon at runtime.
-    // The same values remain editable in the Inspector.
     public float DamagePerPellet
     {
         get => damagePerPellet;
@@ -173,16 +222,6 @@ public sealed class PlayerGun : MonoBehaviour
         set => accuracySpreadDegrees = Mathf.Clamp(value, 0f, 30f);
     }
 
-    public int MagazineSize
-    {
-        get => magazineSize;
-        set
-        {
-            magazineSize = Mathf.Max(1, value);
-            currentAmmo = Mathf.Min(currentAmmo, magazineSize);
-        }
-    }
-
     public float ReloadDuration
     {
         get => reloadDuration;
@@ -194,6 +233,7 @@ public sealed class PlayerGun : MonoBehaviour
         get => maxShotDistance;
         set => maxShotDistance = Mathf.Max(0.1f, value);
     }
+
 
     private bool CanUseWeapon
     {
@@ -207,6 +247,7 @@ public sealed class PlayerGun : MonoBehaviour
         }
     }
 
+
     private void Awake()
     {
         if (playerCamera == null)
@@ -215,30 +256,34 @@ public sealed class PlayerGun : MonoBehaviour
         if (vehicleInteractor == null)
             vehicleInteractor = GetComponent<PlayerVehicleInteractor>();
 
-        currentAmmo = Mathf.Max(1, magazineSize);
+        if (weaponAnimator == null)
+            weaponAnimator = GetComponentInChildren<Animator>(true);
 
-        if (weaponVisual != null)
-        {
-            weaponDefaultLocalPosition = weaponVisual.localPosition;
-            weaponDefaultLocalEulerAngles = weaponVisual.localEulerAngles;
-            hasWeaponDefaultPose = true;
-        }
+        currentAmmo = Mathf.Max(1, magazineSize);
 
         if (muzzleFlash != null)
             muzzleFlash.SetActive(false);
 
         if (playerCamera == null)
             Debug.LogError("PlayerGun: Assign the player's first-person camera.", this);
+
+        CacheAnimatorData();
     }
+
 
     private void Update()
     {
         UpdateMuzzleFlash();
 
-        // This component can remain enabled while driving; the interactor/camera gate
-        // ensures the on-foot weapon cannot be used in the vehicle.
+        // Cancel a reload if the player enters a vehicle midway through it.
+        // Ammo is not replenished; an empty weapon reloads normally after exiting.
         if (!CanUseWeapon)
+        {
+            if (isReloading)
+                CancelReload();
+
             return;
+        }
 
         if (Input.GetKeyDown(reloadKey))
             BeginReload();
@@ -262,22 +307,169 @@ public sealed class PlayerGun : MonoBehaviour
             FireShot();
     }
 
+
     private void OnDisable()
     {
         reloadSequence?.Kill();
         reloadSequence = null;
         isReloading = false;
 
-        RestoreWeaponPose();
+        RestoreAnimatorSpeed();
+        PlayIdleAnimation();
 
         if (muzzleFlash != null)
             muzzleFlash.SetActive(false);
     }
 
+
     private void OnDestroy()
     {
         reloadSequence?.Kill();
+        RestoreAnimatorSpeed();
     }
+
+
+    // --------------------------------------------------
+    // ANIMATOR SETUP
+    // --------------------------------------------------
+
+    private void CacheAnimatorData()
+    {
+        if (weaponAnimator == null)
+            return;
+
+        originalAnimatorSpeed = weaponAnimator.speed;
+
+        idleStateHash = Animator.StringToHash(idleAnim.name);
+        fireStateHash = Animator.StringToHash(shootAnim.name);
+        reloadStateHash = Animator.StringToHash(reloadAnim.name);
+        reloadSpeedParameterHash = Animator.StringToHash(reloadSpeedParameter);
+
+        if (weaponAnimator.runtimeAnimatorController == null)
+        {
+            Debug.LogWarning("PlayerGun: The assigned weapon Animator has no Runtime Animator Controller.", this);
+            return;
+        }
+
+        if (animatorLayer < 0 || animatorLayer >= weaponAnimator.layerCount)
+        {
+            Debug.LogWarning("PlayerGun: Animator Layer index is invalid. Check the Weapon Animation settings.", this);
+            return;
+        }
+
+        hasIdleState = weaponAnimator.HasState(animatorLayer, idleStateHash);
+        hasFireState = weaponAnimator.HasState(animatorLayer, fireStateHash);
+        hasReloadState = weaponAnimator.HasState(animatorLayer, reloadStateHash);
+
+        if (!hasIdleState)
+            Debug.LogWarning($"PlayerGun: Animator state '{idleAnim.name}' was not found.", this);
+
+        if (!hasFireState)
+            Debug.LogWarning($"PlayerGun: Animator state '{shootAnim.name}' was not found. Shooting will still work, but without a fire animation.", this);
+
+        if (!hasReloadState)
+            Debug.LogWarning($"PlayerGun: Animator state '{reloadAnim.name}' was not found. Reloading will still work, but without a reload animation.", this);
+
+        foreach (AnimatorControllerParameter parameter in weaponAnimator.parameters)
+        {
+            if (parameter.nameHash == reloadSpeedParameterHash &&
+                parameter.type == AnimatorControllerParameterType.Float)
+            {
+                hasReloadSpeedParameter = true;
+                break;
+            }
+        }
+
+        if (!hasReloadSpeedParameter && hasReloadState)
+        {
+            Debug.LogWarning(
+                $"PlayerGun: Float Animator parameter '{reloadSpeedParameter}' was not found. " +
+                "Reload speed will be applied to the Animator directly. Add the parameter and use it as the Reload state's Speed Multiplier for finer control.",
+                this);
+        }
+    }
+
+
+    private void PlayFireAnimation()
+    {
+        if (!CanAnimate(hasFireState))
+            return;
+
+        // CrossFade back into the state at normalized time zero. This also retriggers
+        // the fire animation for fast automatic weapons while a previous shot is playing.
+        weaponAnimator.CrossFadeInFixedTime(
+            fireStateHash,
+            Mathf.Max(0f, animationBlendTime),
+            animatorLayer,
+            0f);
+    }
+
+
+    private void PlayReloadAnimation(float totalReloadDuration)
+    {
+        if (!CanAnimate(hasReloadState))
+            return;
+
+        float referenceDuration = Mathf.Max(0.01f, reloadAnimationReferenceDuration);
+        float playbackSpeed = referenceDuration / Mathf.Max(0.01f, totalReloadDuration);
+
+        if (hasReloadSpeedParameter)
+        {
+            weaponAnimator.SetFloat(reloadSpeedParameterHash, playbackSpeed);
+        }
+        else
+        {
+            // Fallback for a simple controller without a Speed Multiplier parameter.
+            // The arms Animator is dedicated to the first-person weapon rig.
+            weaponAnimator.speed = originalAnimatorSpeed * playbackSpeed;
+            usingAnimatorSpeedFallback = true;
+        }
+
+        weaponAnimator.CrossFadeInFixedTime(
+            reloadStateHash,
+            Mathf.Max(0f, animationBlendTime),
+            animatorLayer,
+            0f);
+    }
+
+
+    private void PlayIdleAnimation()
+    {
+        RestoreAnimatorSpeed();
+
+        if (!CanAnimate(hasIdleState))
+            return;
+
+        weaponAnimator.CrossFadeInFixedTime(
+            idleStateHash,
+            Mathf.Max(0f, animationBlendTime),
+            animatorLayer,
+            0f);
+    }
+
+
+    private bool CanAnimate(bool stateExists)
+    {
+        return weaponAnimator != null &&
+               weaponAnimator.isActiveAndEnabled &&
+               weaponAnimator.runtimeAnimatorController != null &&
+               animatorLayer >= 0 &&
+               animatorLayer < weaponAnimator.layerCount &&
+               stateExists;
+    }
+
+
+    private void RestoreAnimatorSpeed()
+    {
+        if (!usingAnimatorSpeedFallback)
+            return;
+
+        if (weaponAnimator != null)
+            weaponAnimator.speed = originalAnimatorSpeed;
+
+        usingAnimatorSpeedFallback = false;
+    }
+
 
     // --------------------------------------------------
     // SHOOTING
@@ -291,6 +483,8 @@ public sealed class PlayerGun : MonoBehaviour
         Vector3 shotOrigin = muzzlePoint != null
             ? muzzlePoint.position
             : playerCamera.transform.position;
+
+        PlayFireAnimation();
 
         // Each pellet gets its own spread direction and ray. The camera ray chooses
         // the crosshair aim point; the muzzle ray then checks the actual line of fire
@@ -314,6 +508,7 @@ public sealed class PlayerGun : MonoBehaviour
         if (currentAmmo <= 0 && reloadAutomaticallyWhenEmpty)
             BeginReload();
     }
+
 
     private void FirePellet(Vector3 shotOrigin)
     {
@@ -353,6 +548,7 @@ public sealed class PlayerGun : MonoBehaviour
         }
     }
 
+
     private Vector3 ApplyAccuracySpread(Vector3 direction)
     {
         if (accuracySpreadDegrees <= 0f)
@@ -369,6 +565,7 @@ public sealed class PlayerGun : MonoBehaviour
             cameraTransform.up * randomSpread.y
         ).normalized;
     }
+
 
     /// <returns>True when the hit object implements ITurretDamageable.</returns>
     private bool ApplyDamage(RaycastHit hit)
@@ -394,6 +591,7 @@ public sealed class PlayerGun : MonoBehaviour
 
         return false;
     }
+
 
     // --------------------------------------------------
     // IMPACT EFFECTS
@@ -426,6 +624,7 @@ public sealed class PlayerGun : MonoBehaviour
                 impactSoundVolume, 1, 20, 50);
         }
     }
+
 
     // --------------------------------------------------
     // MUZZLE FLASH
@@ -462,6 +661,7 @@ public sealed class PlayerGun : MonoBehaviour
         }
     }
 
+
     // --------------------------------------------------
     // CASING EJECTION
     // --------------------------------------------------
@@ -493,6 +693,7 @@ public sealed class PlayerGun : MonoBehaviour
         Destroy(casing, casingLifetime);
     }
 
+
     // --------------------------------------------------
     // RELOADING
     // --------------------------------------------------
@@ -501,6 +702,7 @@ public sealed class PlayerGun : MonoBehaviour
     {
         BeginReload();
     }
+
 
     private void BeginReload()
     {
@@ -511,72 +713,76 @@ public sealed class PlayerGun : MonoBehaviour
         reloadSequence?.Kill();
 
         float totalDuration = Mathf.Max(0.01f, reloadDuration);
-        float transitionDuration = Mathf.Min(
-            Mathf.Max(0.01f, reloadPoseTransitionTime),
-            totalDuration * 0.5f);
+        PlayReloadAnimation(totalDuration);
 
-        // The two transitions are part of Reload Duration. Any remaining time is
-        // spent holding the reload pose, so the animation and ammo refill finish together.
-        float poseHoldDuration = Mathf.Max(
-            0f,
-            totalDuration - transitionDuration * 2f);
-
+        // Gameplay remains authoritative. The animation is played at a calculated
+        // speed and animation events provide synchronized sound/visual feedback.
         reloadSequence = DOTween.Sequence();
-
-        if (weaponVisual != null)
-        {
-            reloadSequence.Append(
-                weaponVisual
-                    .DOLocalMove(reloadLocalPosition, transitionDuration)
-                    .SetEase(reloadPoseEase));
-
-            reloadSequence.Join(
-                weaponVisual
-                    .DOLocalRotate(reloadLocalEulerAngles, transitionDuration, RotateMode.Fast)
-                    .SetEase(reloadPoseEase));
-
-            reloadSequence.AppendInterval(poseHoldDuration);
-
-            if (hasWeaponDefaultPose)
-            {
-                reloadSequence.Append(
-                    weaponVisual
-                        .DOLocalMove(weaponDefaultLocalPosition, transitionDuration)
-                        .SetEase(reloadPoseEase));
-
-                reloadSequence.Join(
-                    weaponVisual
-                        .DOLocalRotate(weaponDefaultLocalEulerAngles, transitionDuration, RotateMode.Fast)
-                        .SetEase(reloadPoseEase));
-            }
-        }
-        else
-        {
-            reloadSequence.AppendInterval(totalDuration);
-        }
+        reloadSequence.AppendInterval(totalDuration);
 
         reloadSequence.OnComplete(() =>
         {
             currentAmmo = Mathf.Max(1, magazineSize);
             isReloading = false;
             reloadSequence = null;
-        });
 
-        if (reloadSound != null)
-        {
-            AudioManager.Play3D(
-                reloadSound,
-                transform.position,
-                reloadSoundVolume);
-        }
+            PlayIdleAnimation();
+        });
     }
 
-    private void RestoreWeaponPose()
+
+    private void CancelReload()
     {
-        if (!hasWeaponDefaultPose || weaponVisual == null)
+        reloadSequence?.Kill();
+        reloadSequence = null;
+        isReloading = false;
+
+        PlayIdleAnimation();
+    }
+
+
+    // --------------------------------------------------
+    // ANIMATION EVENT CALLBACKS
+    // Called through WeaponAnimationEvents on the same GameObject as the Animator.
+    // --------------------------------------------------
+
+    public void AnimationEvent_PlayReloadSound()
+    {
+        PlayReloadEventSound(reloadSound);
+    }
+
+    public void AnimationEvent_PlayMagazineOutSound()
+    {
+        PlayReloadEventSound(magazineOutSound);
+    }
+
+    public void AnimationEvent_PlayMagazineInSound()
+    {
+        PlayReloadEventSound(magazineInSound);
+    }
+
+    public void AnimationEvent_PlayBoltActionSound()
+    {
+        PlayReloadEventSound(boltActionSound);
+    }
+
+    public void AnimationEvent_PlayShellInsertSound()
+    {
+        PlayReloadEventSound(shellInsertSound);
+    }
+
+    private void PlayReloadEventSound(AudioClip clip)
+    {
+        // Ignore late animation events after reload cancellation or vehicle entry.
+        if (clip == null || !isReloading || !CanUseWeapon)
             return;
 
-        weaponVisual.localPosition = weaponDefaultLocalPosition;
-        weaponVisual.localEulerAngles = weaponDefaultLocalEulerAngles;
+        Vector3 soundPosition = weaponAnimator != null
+            ? weaponAnimator.transform.position
+            : transform.position;
+
+        AudioManager.Play2D(
+            clip,
+            reloadSoundVolume);
     }
 }
