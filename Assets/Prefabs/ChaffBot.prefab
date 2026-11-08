@@ -58768,7 +58768,7 @@ MonoBehaviour:
   maxHealth: 30
   hitFlashDuration: 0.08
   deathParticlePool: {fileID: 0}
-  deathSound: {fileID: 8300000, guid: f29ed22f744dd7442be3153371301287, type: 3}
+  deathSound: {fileID: 8300000, guid: c99e337f58429954f8e3bcdc2cee99d0, type: 3}
   deathSoundVolume: 1
   hitSound: {fileID: 8300000, guid: 46e18713a5ce34240b85e332a3b618e8, type: 3}
   altHitSound: {fileID: 8300000, guid: 594ff06b73ab67243a703ec206e5f609, type: 3}
