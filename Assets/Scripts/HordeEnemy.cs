@@ -152,6 +152,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private float nextVehicleHitTime;
 
+    [Header("Baked Animation")]
+    [SerializeField] private HordeBakedAnimator bakedAnimator;
+
     public float VehicleImpactCarDamageMultiplier => vehicleImpactCarDamageMultiplier;
 
     private void Awake()
@@ -163,6 +166,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         currentHealth = maxHealth;
         CacheFlashRenderers();
+
+        if (bakedAnimator == null)
+            bakedAnimator = GetComponentInChildren<HordeBakedAnimator>(true);
     }
 
     private void OnEnable()
@@ -268,6 +274,25 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         // No climbable wall: normal ground movement.
         SimulateGroundMovement(dt, horizontalDirection);
+    }
+
+    // Called by HordeManager.
+    // Animation updates are independent of AI update intervals.
+    internal void ManagedAnimationTick(float elapsed)
+    {
+        if (isDead || bakedAnimator == null)
+            return;
+
+        Vector3 horizontalVelocity = Velocity;
+        horizontalVelocity.y = 0f;
+
+        HordeBakedAnimator.AnimationState state =
+            horizontalVelocity.sqrMagnitude > 0.04f
+                ? HordeBakedAnimator.AnimationState.Move
+                : HordeBakedAnimator.AnimationState.Idle;
+
+        bakedAnimator.Play(state);
+        bakedAnimator.Tick(elapsed);
     }
 
     // ------------------------------------------------
@@ -552,6 +577,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         rb.useGravity = defaultGravity;
         rb.velocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
+
+        if (bakedAnimator != null)
+            bakedAnimator.ResetAnimation();
     }
 
     public void PrepareForPool()

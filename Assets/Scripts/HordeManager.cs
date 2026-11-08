@@ -108,9 +108,10 @@ public sealed class HordeManager : MonoBehaviour
     // ENEMY UPDATE SYSTEM
     // ------------------------------------------------
 
+
     private void FixedUpdate()
     {
-        if (player == null || activeEnemies.Count == 0)
+        if (activeEnemies.Count == 0)
         {
             tickTimer = 0f;
             return;
@@ -126,7 +127,11 @@ public sealed class HordeManager : MonoBehaviour
         float elapsed = tickTimer;
         tickTimer = 0f;
 
-        Vector3 playerPosition = player.position;
+        bool hasPlayer = player != null;
+
+        Vector3 playerPosition = hasPlayer
+            ? player.position
+            : Vector3.zero;
 
         float nearSqr = nearDistance * nearDistance;
         float mediumSqr = mediumDistance * mediumDistance;
@@ -140,6 +145,11 @@ public sealed class HordeManager : MonoBehaviour
                 RemoveAt(i);
                 continue;
             }
+
+            enemy.ManagedAnimationTick(elapsed);
+
+            if (!hasPlayer)
+                continue;
 
             float distanceSqr =
                 (enemy.transform.position - playerPosition).sqrMagnitude;
@@ -160,6 +170,7 @@ public sealed class HordeManager : MonoBehaviour
             );
         }
     }
+
 
     // ------------------------------------------------
     // ENEMY REGISTRATION
