@@ -58766,6 +58766,7 @@ MonoBehaviour:
   xpBlobPool: {fileID: 0}
   xpDropValue: 1
   maxHealth: 30
+  contactDamage: 5
   hitFlashDuration: 0.08
   deathParticlePool: {fileID: 0}
   deathSound: {fileID: 8300000, guid: c99e337f58429954f8e3bcdc2cee99d0, type: 3}
@@ -58779,6 +58780,7 @@ MonoBehaviour:
   vehicleDamageMultiplier: 1
   vehicleKnockbackMultiplier: 1
   vehicleImpactCarDamageMultiplier: 0.1
+  vehicleContactDamageMultiplier: 0.5
   vehicleHitCooldown: 0.1
   bakedAnimator: {fileID: 500860842417058605}
 --- !u!114 &500860842417058605

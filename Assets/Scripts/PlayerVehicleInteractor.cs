@@ -30,6 +30,7 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     private readonly Collider[] overlapBuffer = new Collider[64];
     private VehicleSeat nearbyVehicle;
     private VehicleSeat currentVehicle;
+    public CarController currentCarController;
     private Transform previousParent;
 
     private bool previousPlayerControllerEnabled;
@@ -134,6 +135,17 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         if (seat == null || !seat.TryOccupy())
             return;
 
+        currentCarController = FindCarController(seat);
+
+        if (currentCarController == null)
+        {
+            Debug.LogError(
+                "PlayerVehicleInteractor: The occupied vehicle has no CarController. " +
+                "Player damage cannot be routed to its health.",
+                seat
+            );
+        }
+
         previousParent = transform.parent;
         previousPlayerControllerEnabled = playerController != null && playerController.enabled;
         previousCharacterControllerEnabled = characterController != null && characterController.enabled;
@@ -193,6 +205,7 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         vehicle.Release();
         currentVehicle = null;
         nearbyVehicle = null;
+        currentCarController = null;
 
         if (playerCamera != null)
             playerCamera.enabled = previousPlayerCameraEnabled;
@@ -235,5 +248,31 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     {
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(transform.position, interactionRadius);
+    }
+
+    private static CarController FindCarController(VehicleSeat seat)
+    {
+        if (seat == null)
+            return null;
+
+        CarController car = seat.GetComponent<CarController>();
+
+        if (car == null)
+            car = seat.GetComponentInParent<CarController>();
+
+        if (car == null)
+            car = seat.GetComponentInChildren<CarController>(true);
+
+        return car;
+    }
+
+    public bool TryDamageCurrentVehicle(
+    float damage,
+    HordeEnemy attacker = null)
+    {
+        if (currentCarController == null)
+            return false;
+
+        return currentCarController.TakeVehicleDamage(damage, attacker);
     }
 }

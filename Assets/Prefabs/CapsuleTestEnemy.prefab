@@ -147,8 +147,9 @@ MonoBehaviour:
   xpBlobPool: {fileID: 0}
   xpDropValue: 1
   maxHealth: 30
+  contactDamage: 5
   hitFlashDuration: 0.08
-  deathParticlesPrefab: {fileID: 4226133700024437755, guid: 44ed1dbc7ff608043b312de1c312c339, type: 3}
+  deathParticlePool: {fileID: 0}
   deathSound: {fileID: 8300000, guid: f29ed22f744dd7442be3153371301287, type: 3}
   deathSoundVolume: 1
   hitSound: {fileID: 8300000, guid: 46e18713a5ce34240b85e332a3b618e8, type: 3}
@@ -160,4 +161,6 @@ MonoBehaviour:
   vehicleDamageMultiplier: 1
   vehicleKnockbackMultiplier: 1
   vehicleImpactCarDamageMultiplier: 0.1
+  vehicleContactDamageMultiplier: 1
   vehicleHitCooldown: 0.1
+  bakedAnimator: {fileID: 0}

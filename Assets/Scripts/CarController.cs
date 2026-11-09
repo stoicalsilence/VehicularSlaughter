@@ -203,6 +203,20 @@ public class CarController : MonoBehaviour
     public float currentVehicleHealth;
     public bool vehicleWrecked;
 
+    [Header("Enemy Contact Damage")]
+    [SerializeField, Min(0.05f)]
+    [Tooltip("Minimum time between contact damage ticks from enemies pressing against the car.")]
+    private float enemyContactDamageCooldown = 1f;
+
+    [Header("Car Thorns")]
+    [SerializeField, Min(0f)]
+    private float vehicleThornsDamage = 5f;
+
+    public AudioClip damageSound;
+    public ParticleSystem damageParticles;
+
+    private float nextEnemyContactDamageTime;
+
     public bool IsVehicleWrecked => vehicleWrecked;
 
     // Subscribe from a HUD or game manager if you want to display vehicle health.
@@ -416,6 +430,7 @@ public class CarController : MonoBehaviour
             return;
 
         HandleEnemyImpact(collision);
+        HandleEnemyContactDamage(collision);
 
         // Crash effects are cosmetic and must not control whether gameplay damage runs.
         if (!useCrashEffects)
@@ -484,6 +499,7 @@ public class CarController : MonoBehaviour
             return;
 
         HandleEnemyImpact(collision);
+        HandleEnemyContactDamage(collision);
     }
 
     private void HandleEnemyImpact(Collision collision)
@@ -557,7 +573,68 @@ public class CarController : MonoBehaviour
             impact01);
 
         vehicleDamage *= Mathf.Max(0f, enemy.VehicleImpactCarDamageMultiplier);
-        ApplyVehicleDamage(vehicleDamage);
+        if (TakeVehicleDamage(vehicleDamage))
+        {
+            nextEnemyContactDamageTime =
+                Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
+        }
+    }
+
+    private void HandleEnemyContactDamage(Collision collision)
+    {
+        if (!enableVehicleImpactSystem ||
+            carRigidbody == null ||
+            vehicleWrecked ||
+            currentVehicleHealth <= 0f ||
+            Time.time < nextEnemyContactDamageTime ||
+            collision.collider == null)
+        {
+            return;
+        }
+
+        HordeEnemy enemy =
+            collision.collider.GetComponentInParent<HordeEnemy>();
+
+        if (enemy == null || enemy.IsDead)
+            return;
+
+        // Determine whether the car itself is driving into the enemy.
+        // High-speed ramming is already handled by HandleEnemyImpact().
+        Vector3 toEnemy =
+            enemy.transform.position - carRigidbody.worldCenterOfMass;
+
+        toEnemy = Vector3.ProjectOnPlane(toEnemy, Vector3.up);
+
+        if (toEnemy.sqrMagnitude > 0.001f)
+        {
+            toEnemy.Normalize();
+
+            Vector3 horizontalCarVelocity =
+                Vector3.ProjectOnPlane(
+                    velocityBeforePhysicsStep,
+                    Vector3.up
+                );
+
+            float speedTowardEnemyKmh =
+                Vector3.Dot(horizontalCarVelocity, toEnemy) * 3.6f;
+
+            if (speedTowardEnemyKmh >=
+                Mathf.Max(0f, minimumRunOverSpeedKmh))
+            {
+                return;
+            }
+        }
+
+        // The enemy is pressing against the vehicle rather than
+        // being run over by it.
+        float damage = enemy.contactDamage
+             * enemy.vehicleContactDamageMultiplier;
+
+        if (TakeVehicleDamage(damage, enemy))
+        {
+            nextEnemyContactDamageTime =
+                Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
+        }
     }
 
     private void ApplyVehicleDamage(float damage)
@@ -567,6 +644,8 @@ public class CarController : MonoBehaviour
 
         currentVehicleHealth = Mathf.Max(0f, currentVehicleHealth - damage);
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
+
+        PlayDamageFeedback();
 
         if (currentVehicleHealth <= 0f && !vehicleWrecked)
         {
@@ -1375,4 +1454,43 @@ public class CarController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Applies external damage to the vehicle.
+    /// Returns false when the vehicle cannot accept any more damage.
+    /// </summary>
+    public bool TakeVehicleDamage(float damage, HordeEnemy attacker = null)
+    {
+        if (!enableVehicleImpactSystem ||
+            vehicleWrecked ||
+            currentVehicleHealth <= 0f ||
+            damage <= 0f)
+        {
+            return false;
+        }
+
+        ApplyVehicleDamage(damage);
+
+        // Car thorns: retaliate against the enemy that damaged the car.
+        if (attacker != null &&
+            !attacker.IsDead &&
+            vehicleThornsDamage > 0f)
+        {
+            attacker.ReceiveThornsDamage(vehicleThornsDamage);
+        }
+
+        return true;
+    }
+
+    private void PlayDamageFeedback()
+    {
+        // Play hit sound
+        AudioManager.Play3D(damageSound, transform.position, 1, 1, 1, 100);
+
+        // Play damage particles
+        if (damageParticles != null)
+        {
+            damageParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            damageParticles.Play(true);
+        }
+    }
 }

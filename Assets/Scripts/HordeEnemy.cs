@@ -69,6 +69,10 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     [SerializeField, Min(1f)]
     private float maxHealth = 30f;
 
+    [Header("Contact Damage")]
+    [SerializeField, Min(0f)]
+    public float contactDamage = 10f;
+
     private float currentHealth;
     private bool isDead;
 
@@ -145,6 +149,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     [SerializeField, Min(0f)]
     [Tooltip("Scales how much this enemy damages the car when hit. Use higher values for armored/heavy enemies.")]
     private float vehicleImpactCarDamageMultiplier = 1f;
+
+    [SerializeField, Min(0f)]
+    public float vehicleContactDamageMultiplier = 1f;
 
     [SerializeField, Min(0.05f)]
     [Tooltip("Prevents multiple colliders or repeated contacts from applying several vehicle hits in quick succession.")]
@@ -885,4 +892,11 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         xpBlobPool.Spawn(transform.position, xpDropValue);
     }
 
+    public void ReceiveThornsDamage(float damage)
+    {
+        if (damage <= 0f || IsDead)
+            return;
+
+        TakeDamage(damage);
+    }
 }
