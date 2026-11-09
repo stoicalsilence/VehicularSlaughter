@@ -126,6 +126,21 @@ public class TerrainGenerator : MonoBehaviour
     [Tooltip("World-space size of texture patches. Larger values create larger patches.")]
     public float textureNoiseScale = 90f;
 
+    [Header("Map Boundary")]
+    public bool createBoundaryWalls = true;
+
+    [Min(0.1f)]
+    public float boundaryThickness = 2f;
+
+    [Min(0f)]
+    public float boundaryInset = 1f;
+
+    [Min(0f)]
+    public float boundaryVerticalPadding = 10f;
+
+    [SerializeField, HideInInspector]
+    private Transform generatedBoundaryRoot;
+
     private void Start()
     {
         if (generateOnStart)
@@ -165,6 +180,11 @@ public class TerrainGenerator : MonoBehaviour
         System.Random noiseRandom = new System.Random(unchecked(seed ^ 0x5F3759DF));
 
         GenerateHeightmap(noiseRandom);
+
+        if (createBoundaryWalls)
+            GenerateBoundaryWalls();
+        else
+            ClearBoundaryWalls();
 
         // Generate noise-based terrain textures using a separate, deterministic seed.
         System.Random textureRandom =
@@ -450,6 +470,97 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return totalAmplitude > 0f ? total / totalAmplitude : 0.5f;
+    }
+
+    private void GenerateBoundaryWalls()
+    {
+        ClearBoundaryWalls();
+
+        if (terrain == null || terrain.terrainData == null)
+            return;
+
+        Vector3 size = terrain.terrainData.size;
+
+        float thickness = Mathf.Max(0.1f, boundaryThickness);
+        float inset = Mathf.Clamp(
+            boundaryInset,
+            0f,
+            Mathf.Min(size.x, size.z) * 0.25f
+        );
+
+        // Extend the walls below and above the entire terrain.
+        float padding = Mathf.Max(1f, boundaryVerticalPadding);
+        float wallHeight = size.y + padding * 2f;
+        float centerY = size.y * 0.5f;
+
+        // Create a separate parent for the boundary colliders.
+        GameObject root = new GameObject("__GeneratedTerrainBoundary");
+        root.transform.SetParent(terrain.transform, false);
+
+        generatedBoundaryRoot = root.transform;
+
+        // Left side (West)
+        CreateBoundaryWall(
+            "Boundary_West",
+            new Vector3(inset - thickness * 0.5f, centerY, size.z * 0.5f),
+            new Vector3(thickness, wallHeight, size.z + thickness * 2f)
+        );
+
+        // Right side (East)
+        CreateBoundaryWall(
+            "Boundary_East",
+            new Vector3(size.x - inset + thickness * 0.5f, centerY, size.z * 0.5f),
+            new Vector3(thickness, wallHeight, size.z + thickness * 2f)
+        );
+
+        // Front side (South)
+        CreateBoundaryWall(
+            "Boundary_South",
+            new Vector3(size.x * 0.5f, centerY, inset - thickness * 0.5f),
+            new Vector3(size.x + thickness * 2f, wallHeight, thickness)
+        );
+
+        // Back side (North)
+        CreateBoundaryWall(
+            "Boundary_North",
+            new Vector3(size.x * 0.5f, centerY, size.z - inset + thickness * 0.5f),
+            new Vector3(size.x + thickness * 2f, wallHeight, thickness)
+        );
+    }
+
+    private void CreateBoundaryWall(
+        string wallName,
+        Vector3 localPosition,
+        Vector3 colliderSize)
+    {
+        GameObject wall = new GameObject(wallName);
+
+        wall.transform.SetParent(generatedBoundaryRoot, false);
+        wall.transform.localPosition = localPosition;
+        wall.transform.localRotation = Quaternion.identity;
+        wall.transform.localScale = Vector3.one;
+
+        BoxCollider box = wall.AddComponent<BoxCollider>();
+        box.size = colliderSize;
+    }
+
+    private void ClearBoundaryWalls()
+    {
+        if (generatedBoundaryRoot == null && terrain != null)
+        {
+            generatedBoundaryRoot =
+                terrain.transform.Find("__GeneratedTerrainBoundary");
+        }
+
+        if (generatedBoundaryRoot == null)
+            return;
+
+        if (Application.isPlaying)
+            Destroy(generatedBoundaryRoot.gameObject);
+        else
+            DestroyImmediate(generatedBoundaryRoot.gameObject);
+
+        generatedBoundaryRoot = null;
     }
 
     private int SpawnPointsOfInterest(System.Random rng)

@@ -502,12 +502,12 @@ public class CarController : MonoBehaviour
         HandleEnemyContactDamage(collision);
     }
 
+
     private void HandleEnemyImpact(Collision collision)
     {
         if (!enableVehicleImpactSystem || carRigidbody == null)
             return;
 
-        // The enemy script may live on a parent while the collider is on a child.
         HordeEnemy enemy = collision.collider != null
             ? collision.collider.GetComponentInParent<HordeEnemy>()
             : null;
@@ -515,29 +515,11 @@ public class CarController : MonoBehaviour
         if (enemy == null || enemy.IsDead)
             return;
 
-        // Use the car's actual world velocity, not WheelCollider RPM. The dot product
-        // rejects glancing side-swipes and collisions where the car is moving away.
-        Vector3 toEnemy = enemy.transform.position - carRigidbody.worldCenterOfMass;
-        toEnemy = Vector3.ProjectOnPlane(toEnemy, Vector3.up);
-
-        if (toEnemy.sqrMagnitude < 0.001f)
-        {
-            toEnemy = Vector3.ProjectOnPlane(velocityBeforePhysicsStep, Vector3.up);
-            if (toEnemy.sqrMagnitude < 0.001f)
-                toEnemy = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
-        }
-
-        toEnemy.Normalize();
-
-        // Cached in FixedUpdate before the solver applies this collision's impulse.
-        Vector3 horizontalCarVelocity =
-            Vector3.ProjectOnPlane(velocityBeforePhysicsStep, Vector3.up);
-
-        // Only count the component of the car's speed travelling into this enemy.
-        float speedTowardEnemyKmh =
-            Vector3.Dot(horizontalCarVelocity, toEnemy) * 3.6f;
-
         float minimumSpeed = Mathf.Max(0f, minimumRunOverSpeedKmh);
+        float speedTowardEnemyKmh = GetSpeedTowardEnemyKmh(enemy);
+
+        // Only process run-over damage when the car is moving
+        // toward the enemy fast enough.
         if (speedTowardEnemyKmh < minimumSpeed)
             return;
 
@@ -547,22 +529,25 @@ public class CarController : MonoBehaviour
         float enemyDamage = Mathf.Lerp(
             Mathf.Max(0f, minimumEnemyDamage),
             Mathf.Max(0f, maximumEnemyDamage),
-            impact01);
+            impact01
+        );
 
         float enemyKnockback = Mathf.Lerp(
             Mathf.Max(0f, minimumEnemyKnockback),
             Mathf.Max(0f, maximumEnemyKnockback),
-            impact01);
+            impact01
+        );
 
         Vector3 impactPoint = transform.position;
+
         if (collision.contactCount > 0)
             impactPoint = collision.GetContact(0).point;
 
-        // The enemy owns its per-target cooldown and applies its own resistance/type multipliers.
         bool registeredHit = enemy.ReceiveVehicleImpact(
             enemyDamage,
             impactPoint,
-            enemyKnockback);
+            enemyKnockback
+        );
 
         if (!registeredHit)
             return;
@@ -570,15 +555,19 @@ public class CarController : MonoBehaviour
         float vehicleDamage = Mathf.Lerp(
             Mathf.Max(0f, minimumVehicleDamagePerHit),
             Mathf.Max(0f, maximumVehicleDamagePerHit),
-            impact01);
+            impact01
+        );
 
         vehicleDamage *= Mathf.Max(0f, enemy.VehicleImpactCarDamageMultiplier);
+
         if (TakeVehicleDamage(vehicleDamage))
         {
             nextEnemyContactDamageTime =
                 Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
         }
     }
+
+
 
     private void HandleEnemyContactDamage(Collision collision)
     {
@@ -598,37 +587,16 @@ public class CarController : MonoBehaviour
         if (enemy == null || enemy.IsDead)
             return;
 
-        // Determine whether the car itself is driving into the enemy.
-        // High-speed ramming is already handled by HandleEnemyImpact().
-        Vector3 toEnemy =
-            enemy.transform.position - carRigidbody.worldCenterOfMass;
+        // Run-over impacts are handled separately by HandleEnemyImpact().
+        // Do not trigger contact damage or its feedback during a run-over.
+        float speedTowardEnemyKmh = GetSpeedTowardEnemyKmh(enemy);
 
-        toEnemy = Vector3.ProjectOnPlane(toEnemy, Vector3.up);
+        if (speedTowardEnemyKmh >= Mathf.Max(0f, minimumRunOverSpeedKmh))
+            return;
 
-        if (toEnemy.sqrMagnitude > 0.001f)
-        {
-            toEnemy.Normalize();
-
-            Vector3 horizontalCarVelocity =
-                Vector3.ProjectOnPlane(
-                    velocityBeforePhysicsStep,
-                    Vector3.up
-                );
-
-            float speedTowardEnemyKmh =
-                Vector3.Dot(horizontalCarVelocity, toEnemy) * 3.6f;
-
-            if (speedTowardEnemyKmh >=
-                Mathf.Max(0f, minimumRunOverSpeedKmh))
-            {
-                return;
-            }
-        }
-
-        // The enemy is pressing against the vehicle rather than
-        // being run over by it.
-        float damage = enemy.contactDamage
-             * enemy.vehicleContactDamageMultiplier;
+        // The enemy is pressing against the vehicle at low speed.
+        float damage = enemy.contactDamage *
+                       enemy.vehicleContactDamageMultiplier;
 
         if (TakeVehicleDamage(damage, enemy))
         {
@@ -636,6 +604,7 @@ public class CarController : MonoBehaviour
                 Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
         }
     }
+
 
     private void ApplyVehicleDamage(float damage)
     {
@@ -1487,10 +1456,42 @@ public class CarController : MonoBehaviour
         AudioManager.Play3D(damageSound, transform.position, 1, 1, 1, 100);
 
         // Play damage particles
-        if (damageParticles != null)
+        damageParticles.Stop();
+        damageParticles.Play();
+    }
+
+    private float GetSpeedTowardEnemyKmh(HordeEnemy enemy)
+    {
+        Vector3 toEnemy = enemy.transform.position -
+                          carRigidbody.worldCenterOfMass;
+
+        toEnemy = Vector3.ProjectOnPlane(toEnemy, Vector3.up);
+
+        // Use the car's movement direction if the enemy is
+        // almost directly at the car's centre.
+        if (toEnemy.sqrMagnitude < 0.001f)
         {
-            damageParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            damageParticles.Play(true);
+            toEnemy = Vector3.ProjectOnPlane(
+                velocityBeforePhysicsStep,
+                Vector3.up
+            );
+
+            if (toEnemy.sqrMagnitude < 0.001f)
+            {
+                toEnemy = Vector3.ProjectOnPlane(
+                    transform.forward,
+                    Vector3.up
+                );
+            }
         }
+
+        toEnemy.Normalize();
+
+        Vector3 horizontalVelocity = Vector3.ProjectOnPlane(
+            velocityBeforePhysicsStep,
+            Vector3.up
+        );
+
+        return Vector3.Dot(horizontalVelocity, toEnemy) * 3.6f;
     }
 }

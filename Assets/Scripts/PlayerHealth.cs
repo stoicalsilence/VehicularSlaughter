@@ -32,6 +32,17 @@ public sealed class PlayerHealth : MonoBehaviour
 
     private Coroutine flashCoroutine;
 
+    [Header("Enemy Contact Detection")]
+    [SerializeField]
+    private LayerMask enemyDetectionMask = ~0;
+
+    [SerializeField, Min(0f)]
+    [Tooltip("Small extra detection radius to account for CharacterController skin width.")]
+    private float enemyContactProbeDistance = 0.05f;
+
+    private CharacterController characterController;
+    private readonly Collider[] enemyOverlapBuffer = new Collider[64];
+
     public float CurrentHealth => currentHealth;
     public float MaxHealth => maxHealth;
 
@@ -45,8 +56,83 @@ public sealed class PlayerHealth : MonoBehaviour
         maxHealth = Mathf.Max(1f, maxHealth);
         currentHealth = maxHealth;
 
+        characterController = GetComponent<CharacterController>();
+
         if (vehicleInteractor == null)
             vehicleInteractor = GetComponent<PlayerVehicleInteractor>();
+    }
+
+    private void LateUpdate()
+    {
+        DetectEnemiesTouchingPlayer();
+    }
+
+    private void DetectEnemiesTouchingPlayer()
+    {
+        if (characterController == null ||
+            currentHealth <= 0f ||
+            Time.time < nextDamageTime)
+        {
+            return;
+        }
+
+        // When inside a vehicle, the car handles enemy contact damage.
+        if (vehicleInteractor != null && vehicleInteractor.IsInVehicle)
+            return;
+
+        // Calculate the CharacterController's world-space capsule.
+        Vector3 scale = transform.lossyScale;
+
+        float radius = characterController.radius *
+                       Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+
+        float height = characterController.height * Mathf.Abs(scale.y);
+
+        radius += Mathf.Max(0f, enemyContactProbeDistance);
+        height = Mathf.Max(height, radius * 2f);
+
+        Vector3 center = transform.TransformPoint(characterController.center);
+
+        float halfSegment = height * 0.5f - radius;
+
+        Vector3 point1 = center + transform.up * halfSegment;
+        Vector3 point2 = center - transform.up * halfSegment;
+
+        // Find enemies overlapping or very close to the player capsule.
+        int count = Physics.OverlapCapsuleNonAlloc(
+            point1,
+            point2,
+            radius,
+            enemyOverlapBuffer,
+            enemyDetectionMask,
+            QueryTriggerInteraction.Ignore
+        );
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider other = enemyOverlapBuffer[i];
+
+            if (other == null)
+                continue;
+
+            // Ignore the player's own colliders.
+            if (other.transform == transform ||
+                other.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            HordeEnemy enemy = other.GetComponentInParent<HordeEnemy>();
+
+            if (enemy == null || enemy.IsDead)
+                continue;
+
+            // Use the existing damage and thorns system.
+            bool damaged = TakeDamage(enemy.contactDamage, enemy);
+
+            if (damaged)
+                break;
+        }
     }
 
     /// <summary>
