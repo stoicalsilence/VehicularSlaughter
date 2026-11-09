@@ -141,6 +141,42 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField, HideInInspector]
     private Transform generatedBoundaryRoot;
 
+    [Header("Visual Map Border")]
+
+    public bool generateVisualBorder = true;
+
+    public Material visualBorderMaterial;
+
+    [Min(1f)]
+    public float visualBorderHeight = 18f;
+
+    [Min(0f)]
+    public float visualBorderHeightVariation = 5f;
+
+    [Min(1f)]
+    public float visualBorderThickness = 12f;
+
+    [Min(0f)]
+    public float visualBorderDepth = 15f;
+
+    [Min(0f)]
+    public float visualBorderOverlap = 0.5f;
+
+    [Min(1f)]
+    public float visualBorderSegmentLength = 4f;
+
+    [Min(1f)]
+    public float visualBorderNoiseScale = 30f;
+
+    [Min(0f)]
+    public float visualBorderFaceRoughness = 1.5f;
+
+    [Min(0.1f)]
+    public float visualBorderTextureWorldSize = 5f;
+
+    [SerializeField, HideInInspector]
+    private Transform generatedVisualBorderRoot;
+
     private void Start()
     {
         if (generateOnStart)
@@ -193,6 +229,11 @@ public class TerrainGenerator : MonoBehaviour
         GenerateTerrainTextures(textureRandom);
 
         terrain.Flush();
+
+        if (generateVisualBorder)
+            GenerateVisualBorder();
+        else
+            ClearVisualBorder();
 
         int poiPlaced = SpawnPointsOfInterest(placementRandom);
         int treesPlaced = SpawnTrees(placementRandom);
@@ -755,4 +796,440 @@ public class TerrainGenerator : MonoBehaviour
     {
         return minInclusive + (float)rng.NextDouble() * (maxExclusive - minInclusive);
     }
+
+
+    private void GenerateVisualBorder()
+    {
+        ClearVisualBorder();
+
+        if (terrain == null || terrain.terrainData == null)
+            return;
+
+        if (visualBorderMaterial == null)
+        {
+            Debug.LogWarning(
+                "TerrainGenerator: Assign a material to Visual Border Material.",
+                this);
+            return;
+        }
+
+        TerrainData data = terrain.terrainData;
+        Vector3 size = data.size;
+
+        float perimeter = 2f * (size.x + size.z);
+        float segmentLength = Mathf.Max(1f, visualBorderSegmentLength);
+
+        // Generate points along all four sides, including corners.
+        List<float> distances = new List<float>();
+
+        AddBoundaryDistances(distances, 0f, size.x, segmentLength);
+        AddBoundaryDistances(distances, size.x, size.z, segmentLength);
+        AddBoundaryDistances(distances, size.x + size.z, size.x, segmentLength);
+        AddBoundaryDistances(distances, 2f * size.x + size.z, size.z, segmentLength);
+
+        int count = distances.Count;
+
+        Vector3[] innerBottom = new Vector3[count];
+        Vector3[] innerMiddle = new Vector3[count];
+        Vector3[] innerTop = new Vector3[count];
+
+        Vector3[] outerBottom = new Vector3[count];
+        Vector3[] outerMiddle = new Vector3[count];
+        Vector3[] outerTop = new Vector3[count];
+
+        float[] midV = new float[count];
+        float[] topV = new float[count];
+
+        float safeDepth = Mathf.Max(0.1f, visualBorderDepth);
+        float safeThickness = Mathf.Max(0.5f, visualBorderThickness);
+        float safeNoiseScale = Mathf.Max(1f, visualBorderNoiseScale);
+        float uvScale = Mathf.Max(0.1f, visualBorderTextureWorldSize);
+
+        float seedOffset = seed * 0.0137f;
+
+        // Generate the irregular cliff profile.
+        for (int i = 0; i < count; i++)
+        {
+            float distance = distances[i];
+
+            Vector3 point;
+            Vector3 outward;
+            float miter;
+
+            GetVisualBorderPoint(
+                distance,
+                size,
+                out point,
+                out outward,
+                out miter);
+
+            float normalizedX = point.x / size.x;
+            float normalizedZ = point.z / size.z;
+
+            float groundY = data.GetInterpolatedHeight(
+                normalizedX,
+                normalizedZ);
+
+            // Combine broad and fine noise for an irregular ridgeline.
+            float broadNoise = Mathf.PerlinNoise(
+                (distance + seedOffset) / safeNoiseScale,
+                15.17f + seedOffset * 0.01f);
+
+            float detailNoise = Mathf.PerlinNoise(
+                (distance + seedOffset * 2.3f) /
+                Mathf.Max(1f, safeNoiseScale * 0.28f),
+                43.7f + seedOffset * 0.017f);
+
+            float fineNoise = Mathf.PerlinNoise(
+                (distance + seedOffset * 5.7f) /
+                Mathf.Max(1f, safeNoiseScale * 0.11f),
+                91.2f + seedOffset * 0.031f);
+
+            float heightNoise =
+                (broadNoise - 0.5f) * 2f +
+                (detailNoise - 0.5f) * 0.5f;
+
+            float wallHeight = Mathf.Max(
+                2f,
+                visualBorderHeight +
+                heightNoise * visualBorderHeightVariation);
+
+            float topY = groundY + wallHeight +
+                (fineNoise - 0.5f) * 2f *
+                visualBorderHeightVariation * 0.12f;
+
+            float bulge =
+                (fineNoise - 0.5f) * 2f *
+                visualBorderFaceRoughness;
+
+            float midOffset =
+                (detailNoise - 0.5f) * 2f *
+                visualBorderFaceRoughness * 0.25f;
+
+            float bottomY = groundY - safeDepth;
+
+            float midY = Mathf.Lerp(groundY, topY, 0.48f) + midOffset;
+
+            midY = Mathf.Clamp(
+                midY,
+                groundY + 0.2f,
+                topY - 0.2f);
+
+            // Mitered corners prevent gaps between the four sides.
+            Vector3 innerBase = point -
+                outward * (visualBorderOverlap * miter);
+
+            Vector3 outerBase = point +
+                outward * (safeThickness * miter);
+
+            Vector3 innerMidBase = innerBase +
+                outward * (bulge * 0.2f);
+
+            Vector3 outerMidBase = outerBase +
+                outward * bulge;
+
+            Vector3 outerTopBase = outerBase +
+                outward * (bulge * 0.15f);
+
+            innerBottom[i] = new Vector3(
+                innerBase.x, bottomY, innerBase.z);
+
+            innerMiddle[i] = new Vector3(
+                innerMidBase.x, midY, innerMidBase.z);
+
+            innerTop[i] = new Vector3(
+                innerBase.x, topY, innerBase.z);
+
+            outerBottom[i] = new Vector3(
+                outerBase.x, bottomY, outerBase.z);
+
+            outerMiddle[i] = new Vector3(
+                outerMidBase.x, midY, outerMidBase.z);
+
+            outerTop[i] = new Vector3(
+                outerTopBase.x, topY, outerTopBase.z);
+
+            midV[i] = (midY - bottomY) / uvScale;
+            topV[i] = (topY - bottomY) / uvScale;
+        }
+
+        // Build the mesh.
+        List<Vector3> vertices = new List<Vector3>();
+        List<int> triangles = new List<int>();
+        List<Vector2> uvs = new List<Vector2>();
+
+        float widthUV = safeThickness / uvScale;
+
+        for (int i = 0; i < count; i++)
+        {
+            int next = (i + 1) % count;
+
+            float u0 = distances[i] / uvScale;
+
+            float nextDistance = i == count - 1
+                ? perimeter
+                : distances[i + 1];
+
+            float u1 = nextDistance / uvScale;
+
+            // Inner cliff face: lower section.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                innerBottom[i], innerBottom[next],
+                innerMiddle[next], innerMiddle[i],
+                new Vector2(u0, 0f),
+                new Vector2(u1, 0f),
+                new Vector2(u1, midV[next]),
+                new Vector2(u0, midV[i]));
+
+            // Inner cliff face: upper section.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                innerMiddle[i], innerMiddle[next],
+                innerTop[next], innerTop[i],
+                new Vector2(u0, midV[i]),
+                new Vector2(u1, midV[next]),
+                new Vector2(u1, topV[next]),
+                new Vector2(u0, topV[i]));
+
+            // Outer cliff face: lower section.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                outerBottom[i], outerMiddle[i],
+                outerMiddle[next], outerBottom[next],
+                new Vector2(u0, 0f),
+                new Vector2(u0, midV[i]),
+                new Vector2(u1, midV[next]),
+                new Vector2(u1, 0f));
+
+            // Outer cliff face: upper section.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                outerMiddle[i], outerTop[i],
+                outerTop[next], outerMiddle[next],
+                new Vector2(u0, midV[i]),
+                new Vector2(u0, topV[i]),
+                new Vector2(u1, topV[next]),
+                new Vector2(u1, midV[next]));
+
+            // Top surface connecting the two cliff faces.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                innerTop[i], innerTop[next],
+                outerTop[next], outerTop[i],
+                new Vector2(u0, topV[i]),
+                new Vector2(u1, topV[next]),
+                new Vector2(u1, topV[next] + widthUV),
+                new Vector2(u0, topV[i] + widthUV));
+
+            // Bottom surface.
+            AddVisualBorderQuad(
+                vertices, triangles, uvs,
+                innerBottom[i], outerBottom[i],
+                outerBottom[next], innerBottom[next],
+                new Vector2(u0, 0f),
+                new Vector2(u0, widthUV),
+                new Vector2(u1, widthUV),
+                new Vector2(u1, 0f));
+        }
+
+        Mesh mesh = new Mesh();
+        mesh.name = "Generated Rocky Terrain Border";
+
+        // Support larger borders without exceeding 16-bit indices.
+        if (vertices.Count > 65535)
+            mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.SetUVs(0, uvs);
+
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+
+        // Create the visual border object.
+        GameObject borderObject =
+            new GameObject("__GeneratedVisualBorder");
+
+        borderObject.transform.SetParent(terrain.transform, false);
+
+        generatedVisualBorderRoot = borderObject.transform;
+
+        MeshFilter filter = borderObject.AddComponent<MeshFilter>();
+        filter.sharedMesh = mesh;
+
+        MeshRenderer meshRenderer =
+            borderObject.AddComponent<MeshRenderer>();
+
+        meshRenderer.sharedMaterial = visualBorderMaterial;
+        meshRenderer.receiveShadows = true;
+        meshRenderer.shadowCastingMode =
+            UnityEngine.Rendering.ShadowCastingMode.On;
+    }
+
+    private static void AddBoundaryDistances(
+        List<float> distances,
+        float sideStart,
+        float sideLength,
+        float targetSegmentLength)
+    {
+        int segments = Mathf.Max(
+            1,
+            Mathf.CeilToInt(sideLength / targetSegmentLength));
+
+        for (int i = 0; i < segments; i++)
+        {
+            distances.Add(
+                sideStart + sideLength * ((float)i / segments));
+        }
+    }
+
+    private static void GetVisualBorderPoint(
+        float distance,
+        Vector3 size,
+        out Vector3 point,
+        out Vector3 outward,
+        out float miter)
+    {
+        float right = size.x;
+        float topRight = size.x + size.z;
+        float topLeft = 2f * size.x + size.z;
+
+        miter = 1f;
+
+        // Bottom-left corner.
+        if (Mathf.Abs(distance) < 0.001f)
+        {
+            point = Vector3.zero;
+            outward = new Vector3(-1f, 0f, -1f).normalized;
+            miter = 1.41421356f;
+        }
+        // Bottom-right corner.
+        else if (Mathf.Abs(distance - right) < 0.001f)
+        {
+            point = new Vector3(size.x, 0f, 0f);
+            outward = new Vector3(1f, 0f, -1f).normalized;
+            miter = 1.41421356f;
+        }
+        // Top-right corner.
+        else if (Mathf.Abs(distance - topRight) < 0.001f)
+        {
+            point = new Vector3(size.x, 0f, size.z);
+            outward = new Vector3(1f, 0f, 1f).normalized;
+            miter = 1.41421356f;
+        }
+        // Top-left corner.
+        else if (Mathf.Abs(distance - topLeft) < 0.001f)
+        {
+            point = new Vector3(0f, 0f, size.z);
+            outward = new Vector3(-1f, 0f, 1f).normalized;
+            miter = 1.41421356f;
+        }
+        // Bottom side.
+        else if (distance < right)
+        {
+            point = new Vector3(distance, 0f, 0f);
+            outward = Vector3.back;
+        }
+        // Right side.
+        else if (distance < topRight)
+        {
+            point = new Vector3(
+                size.x, 0f, distance - size.x);
+
+            outward = Vector3.right;
+        }
+        // Top side.
+        else if (distance < topLeft)
+        {
+            point = new Vector3(
+                size.x - (distance - topRight),
+                0f,
+                size.z);
+
+            outward = Vector3.forward;
+        }
+        // Left side.
+        else
+        {
+            point = new Vector3(
+                0f,
+                0f,
+                size.z - (distance - topLeft));
+
+            outward = Vector3.left;
+        }
+    }
+
+    private static void AddVisualBorderQuad(
+        List<Vector3> vertices,
+        List<int> triangles,
+        List<Vector2> uvs,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 d,
+        Vector2 uvA,
+        Vector2 uvB,
+        Vector2 uvC,
+        Vector2 uvD)
+    {
+        int start = vertices.Count;
+
+        vertices.Add(a);
+        vertices.Add(b);
+        vertices.Add(c);
+        vertices.Add(d);
+
+        uvs.Add(uvA);
+        uvs.Add(uvB);
+        uvs.Add(uvC);
+        uvs.Add(uvD);
+
+        triangles.Add(start);
+        triangles.Add(start + 1);
+        triangles.Add(start + 2);
+
+        triangles.Add(start);
+        triangles.Add(start + 2);
+        triangles.Add(start + 3);
+    }
+
+    private void ClearVisualBorder()
+    {
+        if (generatedVisualBorderRoot == null && terrain != null)
+        {
+            generatedVisualBorderRoot =
+                terrain.transform.Find("__GeneratedVisualBorder");
+        }
+
+        if (generatedVisualBorderRoot == null)
+            return;
+
+        MeshFilter filter =
+            generatedVisualBorderRoot.GetComponent<MeshFilter>();
+
+        Mesh mesh = filter != null ? filter.sharedMesh : null;
+
+        GameObject borderObject =
+            generatedVisualBorderRoot.gameObject;
+
+        generatedVisualBorderRoot = null;
+
+        if (Application.isPlaying)
+        {
+            if (mesh != null)
+                Destroy(mesh);
+
+            Destroy(borderObject);
+        }
+        else
+        {
+            if (mesh != null)
+                DestroyImmediate(mesh);
+
+            DestroyImmediate(borderObject);
+        }
+    }
+
 }

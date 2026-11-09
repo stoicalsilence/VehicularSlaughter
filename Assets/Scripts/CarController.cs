@@ -205,7 +205,7 @@ public class CarController : MonoBehaviour
 
     [Header("Enemy Contact Damage")]
     [SerializeField, Min(0.05f)]
-    [Tooltip("Minimum time between contact damage ticks from enemies pressing against the car.")]
+    [Tooltip("Time between contact damage ticks for each individual enemy pressing against the car. The first hit is immediate.")]
     private float enemyContactDamageCooldown = 1f;
 
     [Header("Car Thorns")]
@@ -215,7 +215,25 @@ public class CarController : MonoBehaviour
     public AudioClip damageSound;
     public ParticleSystem damageParticles;
 
-    private float nextEnemyContactDamageTime;
+    // Contact damage is tracked independently for each enemy. This prevents one
+    // enemy's cooldown from suppressing damage from the rest of the horde.
+    private sealed class EnemyContactState
+    {
+        public float nextDamageTime;
+        public float lastContactTime;
+    }
+
+    private readonly Dictionary<HordeEnemy, EnemyContactState> enemyContactStates =
+        new Dictionary<HordeEnemy, EnemyContactState>();
+
+    // Reused buffer so stale contact entries can be removed without allocating
+    // a new list every physics frame.
+    private readonly List<HordeEnemy> staleEnemyContacts =
+        new List<HordeEnemy>();
+
+    // Forget enemies that have not generated a collision callback recently.
+    // This also handles pooled/despawned enemies and avoids stale dictionary entries.
+    private const float EnemyContactForgetDelay = 0.25f;
 
     public bool IsVehicleWrecked => vehicleWrecked;
 
@@ -560,11 +578,9 @@ public class CarController : MonoBehaviour
 
         vehicleDamage *= Mathf.Max(0f, enemy.VehicleImpactCarDamageMultiplier);
 
-        if (TakeVehicleDamage(vehicleDamage))
-        {
-            nextEnemyContactDamageTime =
-                Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
-        }
+        // Run-over damage has its own per-enemy cooldown in HordeEnemy.
+        // Do not modify contact-damage timers here.
+        TakeVehicleDamage(vehicleDamage);
     }
 
 
@@ -575,7 +591,6 @@ public class CarController : MonoBehaviour
             carRigidbody == null ||
             vehicleWrecked ||
             currentVehicleHealth <= 0f ||
-            Time.time < nextEnemyContactDamageTime ||
             collision.collider == null)
         {
             return;
@@ -594,15 +609,55 @@ public class CarController : MonoBehaviour
         if (speedTowardEnemyKmh >= Mathf.Max(0f, minimumRunOverSpeedKmh))
             return;
 
+        float now = Time.time;
+
+        // The first low-speed contact applies damage immediately. Each enemy then
+        // receives its own repeating cooldown, independent of other enemies.
+        if (!enemyContactStates.TryGetValue(enemy, out EnemyContactState state))
+        {
+            state = new EnemyContactState();
+            enemyContactStates.Add(enemy, state);
+        }
+
+        state.lastContactTime = now;
+
+        if (now < state.nextDamageTime)
+            return;
+
         // The enemy is pressing against the vehicle at low speed.
         float damage = enemy.contactDamage *
                        enemy.vehicleContactDamageMultiplier;
 
         if (TakeVehicleDamage(damage, enemy))
         {
-            nextEnemyContactDamageTime =
-                Time.time + Mathf.Max(0.05f, enemyContactDamageCooldown);
+            state.nextDamageTime =
+                now + Mathf.Max(0.05f, enemyContactDamageCooldown);
         }
+    }
+
+    private void CleanupEnemyContactStates()
+    {
+        if (enemyContactStates.Count == 0)
+            return;
+
+        float now = Time.time;
+        staleEnemyContacts.Clear();
+
+        foreach (KeyValuePair<HordeEnemy, EnemyContactState> pair in enemyContactStates)
+        {
+            HordeEnemy enemy = pair.Key;
+            EnemyContactState state = pair.Value;
+
+            if (enemy == null ||
+                enemy.IsDead ||
+                now - state.lastContactTime > EnemyContactForgetDelay)
+            {
+                staleEnemyContacts.Add(enemy);
+            }
+        }
+
+        for (int i = 0; i < staleEnemyContacts.Count; i++)
+            enemyContactStates.Remove(staleEnemyContacts[i]);
     }
 
 
@@ -674,6 +729,8 @@ public class CarController : MonoBehaviour
     {
         if (carRigidbody != null)
             velocityBeforePhysicsStep = carRigidbody.velocity;
+
+        CleanupEnemyContactStates();
     }
 
     // Update is called once per frame

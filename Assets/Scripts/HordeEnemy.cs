@@ -660,9 +660,25 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         if (isDead || damage <= 0f)
             return false;
 
+        // Display the damage that was actually applied (not overkill). Spawn the
+        // number before Die(), because death can immediately return this enemy
+        // to its pool and move its transform elsewhere.
+        float appliedDamage = Mathf.Min(damage, currentHealth);
         currentHealth = Mathf.Max(0f, currentHealth - damage);
 
-        if (currentHealth <= 0f)
+        bool lethalHit = currentHealth <= 0f;
+        Vector3 numberPosition = capsule != null
+            ? capsule.bounds.center + Vector3.up * (capsule.bounds.extents.y + 0.08f)
+            : transform.position + Vector3.up;
+
+        DamageNumberPool.ShowDamage(
+            numberPosition,
+            appliedDamage,
+            maxHealth,
+            lethalHit
+        );
+
+        if (lethalHit)
         {
             Die();
             return false;
