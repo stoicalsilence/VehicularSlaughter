@@ -51,6 +51,16 @@ public sealed class PlayerGun : MonoBehaviour
     [Tooltip("When enabled, holding the fire button repeats shots. Disable for semi-automatic weapons.")]
     [SerializeField] private bool automaticFire = true;
 
+    [Header("Critical Hit Stats")]
+
+    [Tooltip("Critical hit chance in percent. Can exceed 100% for over-critting.")]
+    [Min(0f)]
+    [SerializeField] public float criticalChance = 0f;
+
+    [Tooltip("Damage multiplier applied for EACH critical hit. 2 = double damage.")]
+    [Min(1f)]
+    [SerializeField] public float criticalDamageMultiplier = 2f;
+
 
     [Header("Magazine Stats")]
     [Min(1)]
@@ -543,7 +553,17 @@ public sealed class PlayerGun : MonoBehaviour
             shotLayers,
             QueryTriggerInteraction.Ignore))
         {
-            bool hitDamageable = ApplyDamage(hit);
+            int criticalHits = RollCriticalHits();
+
+            float finalDamage = CalculateCriticalDamage(
+                damagePerPellet,
+                criticalHits);
+
+            bool hitDamageable = ApplyDamage(
+                hit,
+                finalDamage,
+                criticalHits);
+
             PlayImpactEffect(hit, hitDamageable);
         }
     }
@@ -568,7 +588,10 @@ public sealed class PlayerGun : MonoBehaviour
 
 
     /// <returns>True when the hit object implements ITurretDamageable.</returns>
-    private bool ApplyDamage(RaycastHit hit)
+    private bool ApplyDamage(
+        RaycastHit hit,
+        float finalDamage,
+        int criticalHits)
     {
         ITurretDamageable damageable =
             hit.collider.GetComponentInParent<ITurretDamageable>();
@@ -576,17 +599,17 @@ public sealed class PlayerGun : MonoBehaviour
         if (damageable != null)
         {
             damageable.TakeDamage(
-                damagePerPellet,
+                finalDamage,
                 hit.point,
-                knockbackForce);
+                knockbackForce,
+                criticalHits);
 
             return true;
         }
 
-        // Fallback for objects that only implement the project's ordinary damage message.
         hit.collider.SendMessageUpwards(
             damageMessage,
-            damagePerPellet,
+            finalDamage,
             SendMessageOptions.DontRequireReceiver);
 
         return false;
@@ -784,5 +807,33 @@ public sealed class PlayerGun : MonoBehaviour
         AudioManager.Play2D(
             clip,
             reloadSoundVolume);
+    }
+
+    private int RollCriticalHits()
+    {
+        float remainingChance = Mathf.Max(0f, criticalChance);
+
+        // Every complete 100% guarantees another critical hit.
+        int criticalHits = Mathf.FloorToInt(remainingChance / 100f);
+
+        // Roll the remaining percentage.
+        float remainingPercentage = remainingChance % 100f;
+
+        if (Random.value < remainingPercentage / 100f)
+            criticalHits++;
+
+        return criticalHits;
+    }
+
+    private float CalculateCriticalDamage(
+    float baseDamage,
+    int criticalHits)
+    {
+        if (criticalHits <= 0)
+            return baseDamage;
+
+        return baseDamage * Mathf.Pow(
+            Mathf.Max(1f, criticalDamageMultiplier),
+            criticalHits);
     }
 }

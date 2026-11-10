@@ -38,6 +38,16 @@ public class TurretGun : MonoBehaviour
     [Range(0f, 20f)]
     [SerializeField] private float accuracySpreadDegrees = 1.25f;
 
+    [Header("Critical Hit Stats")]
+
+    [Tooltip("Critical hit chance in percent. Can exceed 100% for over-critting.")]
+    [Min(0f)]
+    [SerializeField] public float criticalChance = 0f;
+
+    [Tooltip("Damage multiplier applied for EACH critical hit. 2 = double damage.")]
+    [Min(1f)]
+    [SerializeField] public float criticalDamageMultiplier = 2f;
+
 
     [Header("Magazine Stats")]
     [Min(1)]
@@ -536,9 +546,15 @@ public class TurretGun : MonoBehaviour
         {
             tracerEnd = hit.point;
 
-            ApplyDamage(hit);
+            int criticalHits = RollCriticalHits();
 
-            if(hit.collider.gameObject.layer == 7)
+            float finalDamage = CalculateCriticalDamage(
+                damagePerShot,
+                criticalHits);
+
+            ApplyDamage(hit, finalDamage, criticalHits);
+
+            if (hit.collider.gameObject.layer == 7)
             {
                 GameObject sparks = Instantiate(metalSparkParticles, hit.point, Quaternion.identity);
                 Destroy(sparks, 5);
@@ -597,7 +613,10 @@ public class TurretGun : MonoBehaviour
     }
 
 
-    private void ApplyDamage(RaycastHit hit)
+    private void ApplyDamage(
+    RaycastHit hit,
+    float finalDamage,
+    int criticalHits)
     {
         ITurretDamageable damageable =
             hit.collider.GetComponentInParent<ITurretDamageable>();
@@ -605,17 +624,18 @@ public class TurretGun : MonoBehaviour
         if (damageable != null)
         {
             damageable.TakeDamage(
-                damagePerShot,
+                finalDamage,
                 hit.point,
-                knockbackForce);
+                knockbackForce,
+                criticalHits);
 
             return;
         }
 
-        // Fallback for objects that only support ordinary damage.
+        // Fallback for non-ITurretDamageable objects.
         hit.collider.SendMessageUpwards(
             damageMessage,
-            damagePerShot,
+            finalDamage,
             SendMessageOptions.DontRequireReceiver);
     }
 
@@ -801,5 +821,33 @@ public class TurretGun : MonoBehaviour
         Gizmos.DrawWireSphere(
             transform.position,
             detectionRange);
+    }
+
+    private int RollCriticalHits()
+    {
+        float remainingChance = Mathf.Max(0f, criticalChance);
+
+        // Every complete 100% guarantees another critical hit.
+        int criticalHits = Mathf.FloorToInt(remainingChance / 100f);
+
+        // Roll the remaining percentage.
+        float remainingPercentage = remainingChance % 100f;
+
+        if (Random.value < remainingPercentage / 100f)
+            criticalHits++;
+
+        return criticalHits;
+    }
+
+    private float CalculateCriticalDamage(
+    float baseDamage,
+    int criticalHits)
+    {
+        if (criticalHits <= 0)
+            return baseDamage;
+
+        return baseDamage * Mathf.Pow(
+            Mathf.Max(1f, criticalDamageMultiplier),
+            criticalHits);
     }
 }

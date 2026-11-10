@@ -608,9 +608,21 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     }
 
 
-    public void TakeDamage(float damage)
+    public void TakeDamage(float damage, int criticalHits)
     {
-        ApplyDamage(damage);
+        ApplyDamage(damage, criticalHits);
+    }
+
+    public void TakeDamage(
+    float damage,
+    Vector3 impactPosition,
+    float knockbackForce,
+    int criticalHits)
+    {
+        if (!ApplyDamage(damage, criticalHits))
+            return;
+
+        ApplyKnockback(impactPosition, knockbackForce);
     }
 
     /// <summary>
@@ -632,7 +644,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             return true;
 
         float finalDamage = Mathf.Max(0f, damage) * Mathf.Max(0f, vehicleDamageMultiplier);
-        ApplyDamage(finalDamage);
+        ApplyDamage(finalDamage, 0);
 
         // ApplyDamage may have killed and despawned the enemy.
         if (!isDead && knockbackForce > 0f)
@@ -646,36 +658,30 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         return true;
     }
 
-    // Damage with explicitly requested knockback.
-    public void TakeDamage(float damage, Vector3 impactPosition, float knockbackForce)
-    {
-        if (!ApplyDamage(damage))
-            return;
 
-        ApplyKnockback(impactPosition, knockbackForce);
-    }
-
-    private bool ApplyDamage(float damage)
+    private bool ApplyDamage(float damage, int criticalHits)
     {
         if (isDead || damage <= 0f)
             return false;
 
-        // Display the damage that was actually applied (not overkill). Spawn the
-        // number before Die(), because death can immediately return this enemy
-        // to its pool and move its transform elsewhere.
-        float appliedDamage = Mathf.Min(damage, currentHealth);
+        // Preserve the full damage value for the damage number,
+        // even if it exceeds the enemy's remaining health.
+        float displayedDamage = damage;
+
         currentHealth = Mathf.Max(0f, currentHealth - damage);
 
         bool lethalHit = currentHealth <= 0f;
+
         Vector3 numberPosition = capsule != null
             ? capsule.bounds.center + Vector3.up * (capsule.bounds.extents.y + 0.08f)
             : transform.position + Vector3.up;
 
         DamageNumberPool.ShowDamage(
             numberPosition,
-            appliedDamage,
+            displayedDamage,
             maxHealth,
-            lethalHit
+            lethalHit,
+            criticalHits
         );
 
         if (lethalHit)
@@ -913,6 +919,6 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         if (damage <= 0f || IsDead)
             return;
 
-        TakeDamage(damage);
+        TakeDamage(damage, 0);
     }
 }

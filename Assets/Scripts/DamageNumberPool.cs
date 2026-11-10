@@ -103,10 +103,11 @@ public sealed class DamageNumberPool : MonoBehaviour
     /// is present, so enemies do not need their own references to this component.
     /// </summary>
     public static void ShowDamage(
-        Vector3 worldPosition,
-        float damage,
-        float enemyMaxHealth,
-        bool lethalHit)
+    Vector3 worldPosition,
+    float damage,
+    float enemyMaxHealth,
+    bool lethalHit,
+    int criticalHits)
     {
         if (Instance == null || !Instance.isActiveAndEnabled)
             return;
@@ -114,29 +115,52 @@ public sealed class DamageNumberPool : MonoBehaviour
         if (damage <= 0f || float.IsNaN(damage) || float.IsInfinity(damage))
             return;
 
-        Instance.SpawnNumber(worldPosition, damage, enemyMaxHealth, lethalHit);
+        Instance.SpawnNumber(
+            worldPosition,
+            damage,
+            enemyMaxHealth,
+            lethalHit,
+            criticalHits
+        );
     }
 
     private void SpawnNumber(
-        Vector3 worldPosition,
-        float damage,
-        float enemyMaxHealth,
-        bool lethalHit)
+    Vector3 worldPosition,
+    float damage,
+    float enemyMaxHealth,
+    bool lethalHit,
+    int criticalHits)
     {
         // A fixed-size ring means there are never runtime Instantiate/Destroy calls.
         // At capacity, the oldest slot is simply refreshed.
         PooledNumber number = numbers[nextNumberIndex];
         nextNumberIndex = (nextNumberIndex + 1) % numbers.Length;
 
-        bool heavyHit = !lethalHit && enemyMaxHealth > 0f &&
+        bool isCritical = criticalHits > 0;
+
+        bool heavyHit = !lethalHit &&
+                        !isCritical &&
+                        enemyMaxHealth > 0f &&
                         damage >= enemyMaxHealth * heavyHitHealthFraction;
 
         number.age = 0f;
         number.duration = lifetime * (lethalHit ? 1.12f : 1f);
+
         number.sizeMultiplier = lethalHit
             ? lethalSizeMultiplier
-            : heavyHit ? heavyHitSizeMultiplier : 1f;
-        number.color = lethalHit ? lethalColor : heavyHit ? heavyHitColor : normalColor;
+            : isCritical || heavyHit
+                ? heavyHitSizeMultiplier
+                : 1f;
+
+        // Critical styling takes priority over lethal and heavy-hit styling.
+        number.color = isCritical
+            ? critColor
+            : lethalHit
+                ? lethalColor
+                : heavyHit
+                    ? heavyHitColor
+                    : normalColor;
+
         number.roll = Random.Range(-4f, 4f);
 
         Vector3 jitter = new Vector3(
@@ -145,22 +169,35 @@ public sealed class DamageNumberPool : MonoBehaviour
             Random.Range(-horizontalSpawnJitter.y, horizontalSpawnJitter.y)
         );
 
-        number.startPosition = worldPosition + jitter + Vector3.up * verticalSpawnOffset;
+        number.startPosition =
+            worldPosition + jitter + Vector3.up * verticalSpawnOffset;
 
         Vector3 driftDirection = new Vector3(
             Random.Range(-1f, 1f),
             0f,
             Random.Range(-1f, 1f)
         );
+
         if (driftDirection.sqrMagnitude > 0.001f)
             driftDirection.Normalize();
 
-        number.lateralOffset = driftDirection * Random.Range(lateralDrift * 0.55f, lateralDrift);
-        number.text.SetText("{0:0}", damage);
+        number.lateralOffset =
+            driftDirection * Random.Range(lateralDrift * 0.55f, lateralDrift);
+
+        // Add one exclamation mark on each side for every critical tier.
+        string criticalMarks = new string('!', Mathf.Max(0, criticalHits));
+        string damageText = Mathf.RoundToInt(damage).ToString();
+
+        number.text.text =
+            criticalMarks + damageText + criticalMarks;
+
         number.text.color = number.color;
 
         number.cachedTransform.position = number.startPosition;
-        number.cachedTransform.localScale = prefabScale * initialScale * number.sizeMultiplier;
+
+        number.cachedTransform.localScale =
+            prefabScale * initialScale * number.sizeMultiplier;
+
         number.active = true;
 
         if (!number.text.gameObject.activeSelf)

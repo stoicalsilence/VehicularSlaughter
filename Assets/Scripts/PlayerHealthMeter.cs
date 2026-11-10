@@ -8,6 +8,7 @@ public sealed class PlayerHealthMeter : MonoBehaviour
 
     [SerializeField] private Image healthMeterImage;
     [SerializeField] private TextMeshProUGUI healthText;
+    [SerializeField] public TextMeshProUGUI lastDamageTakenText;
 
     [SerializeField, Min(0f)]
     private float fillLerpSpeed = 10f;
@@ -24,6 +25,8 @@ public sealed class PlayerHealthMeter : MonoBehaviour
         }
 
         displayedFill = player.HealthFraction;
+
+        lastDamageTakenText.text = "";
 
         UpdateVisuals(true);
     }

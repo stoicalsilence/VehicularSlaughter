@@ -11,6 +11,7 @@ something useful for your game. Best regards, Mena.
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -202,6 +203,8 @@ public class CarController : MonoBehaviour
 
     public float currentVehicleHealth;
     public bool vehicleWrecked;
+
+    public TextMeshProUGUI lastDamageTakenText;
 
     [Header("Enemy Contact Damage")]
     [SerializeField, Min(0.05f)]
@@ -439,6 +442,7 @@ public class CarController : MonoBehaviour
             }
         }
 
+        lastDamageTakenText.text = "";
     }
 
     // Handle enemy gameplay impacts separately from optional crash VFX/audio.
@@ -671,11 +675,21 @@ public class CarController : MonoBehaviour
 
         PlayDamageFeedback();
 
+        CancelInvoke(nameof(HideLastDamageText));
+        int damageInt = (int)damage;
+        lastDamageTakenText.text = "-" + damageInt.ToString();
+        Invoke(nameof(HideLastDamageText), 5);
+
         if (currentVehicleHealth <= 0f && !vehicleWrecked)
         {
             vehicleWrecked = true;
             OnVehicleHealthDepleted();
         }
+    }
+
+    private void HideLastDamageText()
+    {
+        lastDamageTakenText.text = "";
     }
 
     /// <summary>Restores vehicle health. A positive repair can bring a wrecked car back into service.</summary>

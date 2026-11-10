@@ -26,6 +26,8 @@ public sealed class PlayerHealth : MonoBehaviour
 
     private float currentHealth;
 
+    public PlayerHealthMeter playerHealthMeter;
+
     // Enemy attacks use independent cooldowns. Damage without an identified
     // enemy (for example, environmental damage) uses the fallback cooldown.
     private float nextDamageTime;
@@ -254,6 +256,11 @@ public sealed class PlayerHealth : MonoBehaviour
 
         currentHealth = Mathf.Max(0f, currentHealth - damage);
 
+        CancelInvoke(nameof(HideLastDamageText));
+        int damageInt = (int)damage;
+        playerHealthMeter.lastDamageTakenText.text = "-" + damageInt.ToString();
+        Invoke(nameof(HideLastDamageText), 5);
+
         PlayDamageFeedback();
 
         StartDamageCooldown(attacker);
@@ -267,6 +274,11 @@ public sealed class PlayerHealth : MonoBehaviour
         }
 
         return true;
+    }
+
+    private void HideLastDamageText()
+    {
+        playerHealthMeter.lastDamageTakenText.text = "";
     }
 
     private bool IsDamageOnCooldown(HordeEnemy attacker)
