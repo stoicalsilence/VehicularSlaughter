@@ -585,6 +585,12 @@ public class TurretGun : MonoBehaviour
 
         currentAmmo = Mathf.Max(0, currentAmmo - 1);
 
+        if (currentAmmo <= 0)
+        {
+            BeginReload();
+            return;
+        }
+
         nextShotTime =
             Time.time + (1f / Mathf.Max(0.01f, fireRate));
     }

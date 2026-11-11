@@ -612,5 +612,20 @@ namespace Q3Movement
 
             return wishDir;
         }
+
+        public void SyncMouseLookToCurrentRotation(Transform cameraTransform = null)
+        {
+            m_Tran = transform;
+
+            if (cameraTransform != null)
+                m_CamTran = cameraTransform;
+            else if (m_Camera != null)
+                m_CamTran = m_Camera.transform;
+
+            if (m_CamTran == null)
+                return;
+
+            m_MouseLook.Init(m_Tran, m_CamTran);
+        }
     }
 }

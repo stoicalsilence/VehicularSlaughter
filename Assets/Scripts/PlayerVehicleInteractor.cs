@@ -40,9 +40,10 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
     public GameObject crosshair;
 
+    public AudioClip enterVehicleSound;
+    public AudioClip exitVehicleSound;
+
     public bool IsInVehicle => currentVehicle != null;
-    public VehicleSeat NearbyVehicle => nearbyVehicle;
-    public VehicleSeat CurrentVehicle => currentVehicle;
 
     private void Awake()
     {
@@ -146,6 +147,7 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             );
         }
 
+        AudioManager.Play2D(enterVehicleSound, 1);
         previousParent = transform.parent;
         previousPlayerControllerEnabled = playerController != null && playerController.enabled;
         previousCharacterControllerEnabled = characterController != null && characterController.enabled;
@@ -188,25 +190,49 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
         VehicleSeat vehicle = currentVehicle;
         Transform exitPoint = vehicle.ExitPoint;
+        AudioManager.Play2D(exitVehicleSound, 1);
 
-        // Disable the vehicle camera first. Its OnDisable unlocks the cursor; the first-person
-        // MouseLook can re-lock it on its next Update according to its own cursor state.
+        // Disable the vehicle camera first.
         vehicle.SetVehicleCameraActive(false);
 
+        // Restore the player's original parent.
         transform.SetParent(previousParent, true);
+
         if (exitPoint != null)
         {
-            Vector3 euler = exitPoint.rotation.eulerAngles;
+            // Use the ExitPoint's forward direction as the player's
+            // desired facing direction after exiting.
+            Vector3 exitForward = Vector3.ProjectOnPlane(
+                exitPoint.forward,
+                Vector3.up
+            );
+
+            // Fallback in case the ExitPoint has an invalid forward direction.
+            if (exitForward.sqrMagnitude < 0.001f)
+            {
+                exitForward = Vector3.ProjectOnPlane(
+                    vehicle.transform.forward,
+                    Vector3.up
+                );
+            }
+
+            Quaternion exitRotation = exitForward.sqrMagnitude > 0.001f
+                ? Quaternion.LookRotation(exitForward.normalized, Vector3.up)
+                : transform.rotation;
+
             transform.SetPositionAndRotation(
                 exitPoint.position,
-                Quaternion.Euler(0f, euler.y, 0f));
+                exitRotation
+            );
         }
 
         vehicle.Release();
+
         currentVehicle = null;
         nearbyVehicle = null;
         currentCarController = null;
 
+        // Restore the first-person camera.
         if (playerCamera != null)
             playerCamera.enabled = previousPlayerCameraEnabled;
 
@@ -218,7 +244,17 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
         if (playerController != null)
         {
-            playerController.SendMessage("ResetMovementState", SendMessageOptions.DontRequireReceiver);
+            playerController.SendMessage(
+                "ResetMovementState",
+                SendMessageOptions.DontRequireReceiver
+            );
+
+            // IMPORTANT:
+            // Update MouseLook's cached rotation BEFORE enabling the controller.
+            playerController.SyncMouseLookToCurrentRotation(
+                playerCamera != null ? playerCamera.transform : null
+            );
+
             playerController.enabled = previousPlayerControllerEnabled;
         }
 
