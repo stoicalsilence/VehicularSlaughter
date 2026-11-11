@@ -8,18 +8,13 @@ using UnityEngine.UI;
 [RequireComponent(typeof(CharacterController))]
 public sealed class PlayerHealth : MonoBehaviour
 {
-    [Header("Health")]
-    [SerializeField, Min(1f)]
-    private float maxHealth = 100f;
+    public PlayerStats playerStats;
 
-    [Header("Damage")]
-    [Tooltip("Minimum time between accepted hits from the same enemy. Each enemy has its own independent cooldown.")]
-    [SerializeField, Min(0f)]
-    private float damageCooldown = 0.75f;
+    private float maxHealth => playerStats.maxHealth;
 
-    [Header("Thorns")]
-    [SerializeField, Min(0f)]
-    private float thornsDamage = 5f;
+    private float damageCooldown => playerStats.damageCooldown;
+
+    public float thornsDamage => playerStats.thornsDamage;
 
     [SerializeField]
     private PlayerVehicleInteractor vehicleInteractor;
@@ -77,7 +72,17 @@ public sealed class PlayerHealth : MonoBehaviour
 
     private void Awake()
     {
-        maxHealth = Mathf.Max(1f, maxHealth);
+        if (playerStats == null)
+            playerStats = GetComponentInParent<PlayerStats>();
+
+        if (playerStats == null)
+        {
+            Debug.LogError("PlayerGun: PlayerStats not found!", this);
+            enabled = false;
+            return;
+        }
+
+        playerStats.maxHealth = Mathf.Max(1f, maxHealth);
         currentHealth = maxHealth;
 
         characterController = GetComponent<CharacterController>();
@@ -365,5 +370,25 @@ public sealed class PlayerHealth : MonoBehaviour
 
             flashCoroutine = StartCoroutine(FadeDamageFlash());
         }
+    }
+
+    private void OnDisable()
+    {
+        playerStats.MaxHealthChanged -= OnMaxHealthChanged;
+    }
+
+    private void OnMaxHealthChanged(float oldMax, float newMax)
+    {
+        if (currentHealth > 0f)
+        {
+            float increase = newMax - oldMax;
+            currentHealth = Mathf.Clamp(
+                currentHealth + increase,
+                0f,
+                newMax
+            );
+        }
+
+        HealthChanged?.Invoke(currentHealth, newMax);
     }
 }

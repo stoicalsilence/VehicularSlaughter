@@ -18,29 +18,25 @@ using UnityEngine.UI;
 public class CarController : MonoBehaviour
 {
 
-    //CAR SETUP
+    [Header("Stats")]
+    [SerializeField] private CarStats carStats;
 
-    [Space(20)]
-    //[Header("CAR SETUP")]
-    [Space(10)]
-    [Range(20, 190)]
-    public int maxSpeed = 90; //The maximum speed that the car can reach in km/h.
-    [Range(10, 120)]
-    public int maxReverseSpeed = 45; //The maximum speed that the car can reach while going on reverse in km/h.
-    [Range(1, 10)]
-    public int accelerationMultiplier = 2; // How fast the car can accelerate. 1 is a slow acceleration and 10 is the fastest.
-    [Space(10)]
-    [Range(10, 45)]
-    public int maxSteeringAngle = 27; // The maximum angle that the tires can reach while rotating the steering wheel.
-    [Range(0.1f, 1f)]
-    public float steeringSpeed = 0.5f; // How fast the steering wheel turns.
-    [Space(10)]
-    [Range(100, 600)]
-    public int brakeForce = 350; // The strength of the wheel brakes.
-    [Range(1, 10)]
-    public int decelerationMultiplier = 2; // How fast the car decelerates when the user is not using the throttle.
-    [Range(1, 10)]
-    public int handbrakeDriftMultiplier = 5; // How much grip the car loses when the user hit the handbrake.
+    //CAR SETUP
+    public int maxSpeed => carStats.maxSpeed; //The maximum speed that the car can reach in km/h.
+    
+    public int maxReverseSpeed => carStats.maxReverseSpeed; //The maximum speed that the car can reach while going on reverse in km/h.
+    
+    public int accelerationMultiplier => carStats.accelerationMultiplier; // How fast the car can accelerate. 1 is a slow acceleration and 10 is the fastest.
+    
+    public int maxSteeringAngle => carStats.maxSteeringAngle; // The maximum angle that the tires can reach while rotating the steering wheel.
+    
+    public float steeringSpeed => carStats.steeringSpeed; // How fast the steering wheel turns.
+    
+    public int brakeForce => carStats.brakeForce; // The strength of the wheel brakes.
+    
+    public int decelerationMultiplier => carStats.decelerationMultiplier; // How fast the car decelerates when the user is not using the throttle.
+    
+    public int handbrakeDriftMultiplier => carStats.handbrakeDriftMultiplier; // How much grip the car loses when the user hit the handbrake.
     [Space(10)]
     public Vector3 bodyMassCenter; // This is a vector that contains the center of mass of the car. I recommend to set this value
                                    // in the points x = 0 and z = 0 of your car. You can select the value that you want in the y axis,
@@ -170,50 +166,31 @@ public class CarController : MonoBehaviour
     [Header("VEHICLE DURABILITY / ENEMY IMPACTS")]
     [SerializeField] private bool enableVehicleImpactSystem = true;
 
-    [SerializeField, Min(1f)]
-    [Tooltip("The car is wrecked when this reaches zero.")]
-    public float maxVehicleHealth = 100f;
+    private float maxVehicleHealth => carStats.maxVehicleHealth;
 
-    [SerializeField, Min(0f)]
-    [Tooltip("The car must be travelling toward an enemy at least this fast to damage or push it. In km/h.")]
-    private float minimumRunOverSpeedKmh = 18f;
+    private float minimumRunOverSpeedKmh => carStats.minimumRunOverSpeedKmh;
 
-    [SerializeField, Min(1f)]
-    [Tooltip("Speed at which enemy damage, knockback and car damage reach their maximum values. In km/h.")]
-    private float maximumImpactSpeedKmh = 70f;
+    private float maximumImpactSpeedKmh => carStats.maximumImpactSpeedKmh;
 
-    [SerializeField, Min(0f)]
-    private float minimumEnemyDamage = 10f;
+    private float minimumEnemyDamage => carStats.minimumEnemyDamage;
 
-    [SerializeField, Min(0f)]
-    private float maximumEnemyDamage = 36f;
+    private float maximumEnemyDamage => carStats.maximumEnemyDamage;
 
-    [SerializeField, Min(0f)]
-    [Tooltip("Knockback is a Rigidbody velocity change in metres per second.")]
-    private float minimumEnemyKnockback = 2f;
+    private float minimumEnemyKnockback => carStats.minimumEnemyKnockback;
 
-    [SerializeField, Min(0f)]
-    private float maximumEnemyKnockback = 9f;
+    private float maximumEnemyKnockback => carStats.maximumEnemyKnockback;
 
-    [SerializeField, Min(0f)]
-    private float minimumVehicleDamagePerHit = 1f;
+    private float minimumVehicleDamagePerHit => carStats.minimumVehicleDamagePerHit;
 
-    [SerializeField, Min(0f)]
-    private float maximumVehicleDamagePerHit = 10f;
+    private float maximumVehicleDamagePerHit => carStats.maximumVehicleDamagePerHit;
 
     public float currentVehicleHealth;
     public bool vehicleWrecked;
 
     public TextMeshProUGUI lastDamageTakenText;
+    private float enemyContactDamageCooldown => carStats.enemyContactDamageCooldown;
 
-    [Header("Enemy Contact Damage")]
-    [SerializeField, Min(0.05f)]
-    [Tooltip("Time between contact damage ticks for each individual enemy pressing against the car. The first hit is immediate.")]
-    private float enemyContactDamageCooldown = 1f;
-
-    [Header("Car Thorns")]
-    [SerializeField, Min(0f)]
-    private float vehicleThornsDamage = 5f;
+    private float vehicleThornsDamage => carStats.vehicleThornsDamage;
 
     public AudioClip damageSound;
     public ParticleSystem damageParticles;
@@ -225,6 +202,8 @@ public class CarController : MonoBehaviour
         public float nextDamageTime;
         public float lastContactTime;
     }
+
+    private bool vehicleHealthInitialized;
 
     private readonly Dictionary<HordeEnemy, EnemyContactState> enemyContactStates =
         new Dictionary<HordeEnemy, EnemyContactState>();
@@ -309,6 +288,24 @@ public class CarController : MonoBehaviour
     WheelFrictionCurve RRwheelFriction;
     float RRWextremumSlip;
 
+
+    private void Awake()
+    {
+        if (carStats == null)
+            carStats = GetComponent<CarStats>();
+
+        if (carStats == null)
+        {
+            Debug.LogError(
+                "CarController requires a CarStats component on the same GameObject.",
+                this
+            );
+
+            enabled = false;
+            return;
+        }
+    }
+
     // Start is called before the first frame update
     void Start()
     {
@@ -318,9 +315,10 @@ public class CarController : MonoBehaviour
         carRigidbody = gameObject.GetComponent<Rigidbody>();
         carRigidbody.centerOfMass = bodyMassCenter;
 
-        maxVehicleHealth = Mathf.Max(1f, maxVehicleHealth);
         currentVehicleHealth = maxVehicleHealth;
         vehicleWrecked = false;
+        vehicleHealthInitialized = true;
+
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
 
         //Initial setup to calculate the drift value of the car. This part could look a bit
@@ -1564,5 +1562,36 @@ public class CarController : MonoBehaviour
         );
 
         return Vector3.Dot(horizontalVelocity, toEnemy) * 3.6f;
+    }
+
+    private void OnEnable()
+    {
+        if (carStats != null)
+            carStats.MaxVehicleHealthChanged += OnMaxVehicleHealthChanged;
+    }
+
+    private void OnDisable()
+    {
+        if (carStats != null)
+            carStats.MaxVehicleHealthChanged -= OnMaxVehicleHealthChanged;
+    }
+
+    private void OnMaxVehicleHealthChanged(float oldMax, float newMax)
+    {
+        // Ignore changes before Start initializes the vehicle's health.
+        if (!vehicleHealthInitialized)
+            return;
+
+        // Increasing maximum health does not automatically heal the vehicle.
+        // Decreasing maximum health clamps current health to the new maximum.
+        currentVehicleHealth = Mathf.Min(currentVehicleHealth, newMax);
+
+        if (currentVehicleHealth <= 0f && !vehicleWrecked)
+        {
+            vehicleWrecked = true;
+            OnVehicleHealthDepleted();
+        }
+
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, newMax);
     }
 }

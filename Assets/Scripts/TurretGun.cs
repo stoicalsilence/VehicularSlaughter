@@ -11,6 +11,8 @@ using UnityEngine;
 public class TurretGun : MonoBehaviour
 {
     [Header("References")]
+    public CarStats carStats;
+
     [Tooltip("Transform that rotates to aim and moves into the reload pose.")]
     public Transform GunVisual;
 
@@ -18,51 +20,25 @@ public class TurretGun : MonoBehaviour
     [SerializeField] private GameObject muzzleFlash;
     [SerializeField] private LineRenderer bulletTracer;
 
+    [SerializeField] private float damagePerShot => carStats.turretDamagePerShot;
 
-    [Header("UPGRADE STATS")]
-    [Space(5)]
+    [SerializeField] private float knockbackForce => carStats.turretKnockbackForce;
 
-    [Header("Offensive Stats")]
-    [Min(0f)]
-    [SerializeField] private float damagePerShot = 10f;
+    [SerializeField] private float fireRate => carStats.turretFireRate;
 
-    [Tooltip("Knockback force applied to enemies hit by this turret.")]
-    [Min(0f)]
-    [SerializeField] private float knockbackForce = 5f;
+    [SerializeField] private float accuracySpreadDegrees => carStats.turretAccuracySpreadDegrees;
 
-    [Tooltip("Shots fired per second.")]
-    [Min(0.01f)]
-    [SerializeField] private float fireRate = 6f;
+    [SerializeField] public float criticalChance => carStats.turretCriticalChance;
 
-    [Tooltip("Accuracy spread in degrees.")]
-    [Range(0f, 20f)]
-    [SerializeField] private float accuracySpreadDegrees = 1.25f;
+    [SerializeField] public float criticalDamageMultiplier => carStats.turretCriticalDamageMultiplier;
 
-    [Header("Critical Hit Stats")]
+    [SerializeField] private int magazineSize => carStats.turretMagazineSize;
 
-    [Tooltip("Critical hit chance in percent. Can exceed 100% for over-critting.")]
-    [Min(0f)]
-    [SerializeField] public float criticalChance = 0f;
+    [SerializeField] private float reloadTime => carStats.turretReloadTime;
 
-    [Tooltip("Damage multiplier applied for EACH critical hit. 2 = double damage.")]
-    [Min(1f)]
-    [SerializeField] public float criticalDamageMultiplier = 2f;
+    [SerializeField] private float detectionRange => carStats.turretDetectionRange;
 
-
-    [Header("Magazine Stats")]
-    [Min(1)]
-    [SerializeField] private int magazineSize = 30;
-
-    [Min(0.01f)]
-    [SerializeField] private float reloadTime = 2.2f;
-
-
-    [Header("Range Stats")]
-    [Min(0f)]
-    [SerializeField] private float detectionRange = 20f;
-
-    [Min(0.1f)]
-    [SerializeField] private float maxShotDistance = 40f;
+    [SerializeField] private float maxShotDistance => carStats.turretMaxShotDistance;
 
 
     [Header("Targeting")]
@@ -199,6 +175,20 @@ public class TurretGun : MonoBehaviour
 
     private void Awake()
     {
+        if (carStats == null)
+            carStats = GetComponent<CarStats>();
+
+        if (carStats == null)
+        {
+            Debug.LogError(
+                "CarController requires a CarStats component on the same GameObject.",
+                this
+            );
+
+            enabled = false;
+            return;
+        }
+
         currentAmmo = magazineSize;
 
         if (muzzleFlash != null)

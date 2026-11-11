@@ -10,36 +10,16 @@ namespace Q3Movement
     [RequireComponent(typeof(CharacterController))]
     public class Q3PlayerController : MonoBehaviour
     {
-        [System.Serializable]
-        public class MovementSettings
-        {
-            [Min(0f)] public float MaxSpeed;
-            [Min(0f)] public float Acceleration;
-            [Min(0f)] public float Deceleration;
-
-            public MovementSettings(float maxSpeed, float accel, float decel)
-            {
-                MaxSpeed = maxSpeed;
-                Acceleration = accel;
-                Deceleration = decel;
-            }
-        }
-
         [Header("Aiming")]
         [SerializeField] private Camera m_Camera;
         [SerializeField] private MouseLook m_MouseLook = new MouseLook();
 
+        [Header("References")]
+        public PlayerStats playerStats;
+
         [Header("Movement")]
-        [SerializeField, Min(0f)] private float m_Friction = 6f;
-        [SerializeField, Min(0f)] private float m_Gravity = 20f;
-        [SerializeField, Min(0f)] private float m_JumpForce = 8f;
         [Tooltip("Automatically jump again while the jump button remains held.")]
         [SerializeField] private bool m_AutoBunnyHop = false;
-        [Tooltip("Strength of Quake-style directional air control.")]
-        [SerializeField, Min(0f)] private float m_AirControl = 0.3f;
-        [SerializeField] private MovementSettings m_GroundSettings = new MovementSettings(7f, 14f, 10f);
-        [SerializeField] private MovementSettings m_AirSettings = new MovementSettings(7f, 2f, 2f);
-        [SerializeField] private MovementSettings m_StrafeSettings = new MovementSettings(1f, 50f, 50f);
 
         [Header("Terrain Grounding")]
         [Tooltip("Include terrain and walkable ground layers. For best results, use only ground/terrain layers.")]
@@ -79,6 +59,24 @@ namespace Q3Movement
         [SerializeField, Range(0f, 1f)] private float m_FootstepVolume = 0.8f;
         [SerializeField, Range(0f, 1f)] private float m_JumpVolume = 0.8f;
 
+        // Upgradeable movement values are owned by PlayerStats.
+        public float friction => playerStats.friction;
+        public float gravity => playerStats.gravity;
+        public float jumpForce => playerStats.jumpForce;
+        public float airControl => playerStats.airControl;
+
+        public float groundMoveSpeed => playerStats.groundMoveSpeed;
+        public float groundAcceleration => playerStats.groundAcceleration;
+        public float groundDeceleration => playerStats.groundDeceleration;
+
+        public float airMoveSpeed => playerStats.airMoveSpeed;
+        public float airAcceleration => playerStats.airAcceleration;
+        public float airDeceleration => playerStats.airDeceleration;
+
+        public float strafeMaxSpeed => playerStats.strafeMaxSpeed;
+        public float strafeAcceleration => playerStats.strafeAcceleration;
+        public float strafeDeceleration => playerStats.strafeDeceleration;
+
         /// <summary>Magnitude of the CharacterController's measured velocity.</summary>
         public float Speed { get { return m_Character != null ? m_Character.velocity.magnitude : 0f; } }
 
@@ -108,6 +106,16 @@ namespace Q3Movement
 
         private void Start()
         {
+            if (playerStats == null)
+                playerStats = GetComponentInParent<PlayerStats>();
+
+            if (playerStats == null)
+            {
+                Debug.LogError("Q3PlayerController: PlayerStats not found!", this);
+                enabled = false;
+                return;
+            }
+
             m_Tran = transform;
             m_Character = GetComponent<CharacterController>();
             InitializeMovementAudio();
@@ -349,9 +357,9 @@ namespace Q3Movement
                 wishDir = Vector3.zero;
 
             m_MoveDirectionNorm = wishDir;
-            float wishSpeed = m_MoveInput.magnitude * m_GroundSettings.MaxSpeed;
+            float wishSpeed = m_MoveInput.magnitude * groundMoveSpeed;
 
-            Accelerate(wishDir, wishSpeed, m_GroundSettings.Acceleration, dt);
+            Accelerate(wishDir, wishSpeed, groundAcceleration, dt);
 
             // Keep accumulated ground velocity tangent as terrain normals change frame-to-frame.
             m_PlayerVelocity = Vector3.ProjectOnPlane(m_PlayerVelocity, m_GroundNormal);
@@ -363,7 +371,7 @@ namespace Q3Movement
             // gravity along the slope plane, but cap the slide speed and retain limited steering.
             m_PlayerVelocity = Vector3.ProjectOnPlane(m_PlayerVelocity, m_GroundNormal);
 
-            Vector3 gravityAlongSlope = Vector3.ProjectOnPlane(Vector3.down * m_Gravity, m_GroundNormal);
+            Vector3 gravityAlongSlope = Vector3.ProjectOnPlane(Vector3.down * gravity, m_GroundNormal);
             m_PlayerVelocity += gravityAlongSlope * dt;
 
             Vector3 wishDir = Vector3.ProjectOnPlane(
@@ -373,8 +381,8 @@ namespace Q3Movement
             if (wishDir.sqrMagnitude > 0.0001f && m_SteepSlopeControl > 0f)
             {
                 wishDir.Normalize();
-                float wishSpeed = m_MoveInput.magnitude * m_GroundSettings.MaxSpeed * m_SteepSlopeControl;
-                Accelerate(wishDir, wishSpeed, m_GroundSettings.Acceleration * m_SteepSlopeControl, dt);
+                float wishSpeed = m_MoveInput.magnitude * groundMoveSpeed * m_SteepSlopeControl;
+                Accelerate(wishDir, wishSpeed, groundAcceleration * m_SteepSlopeControl, dt);
             }
 
             m_PlayerVelocity = Vector3.ProjectOnPlane(m_PlayerVelocity, m_GroundNormal);
@@ -389,7 +397,7 @@ namespace Q3Movement
         {
             Vector3 wishDir = GetHorizontalWishDirection();
             float inputMagnitude = m_MoveInput.magnitude;
-            float wishSpeed = inputMagnitude * m_AirSettings.MaxSpeed;
+            float wishSpeed = inputMagnitude * airMoveSpeed;
             float airControlTargetSpeed = wishSpeed;
             float accel;
 
@@ -399,23 +407,23 @@ namespace Q3Movement
             m_MoveDirectionNorm = wishDir;
 
             if (Vector3.Dot(m_PlayerVelocity, wishDir) < 0f)
-                accel = m_AirSettings.Deceleration;
+                accel = airDeceleration;
             else
-                accel = m_AirSettings.Acceleration;
+                accel = airAcceleration;
 
             // Retain the original CPM-style strafe speed/acceleration settings.
             if (Mathf.Abs(m_MoveInput.z) < 0.001f && Mathf.Abs(m_MoveInput.x) > 0.001f)
             {
-                wishSpeed = Mathf.Min(wishSpeed, m_StrafeSettings.MaxSpeed);
-                accel = m_StrafeSettings.Acceleration;
+                wishSpeed = Mathf.Min(wishSpeed, strafeMaxSpeed);
+                accel = strafeAcceleration;
             }
 
             Accelerate(wishDir, wishSpeed, accel, dt);
 
-            if (m_AirControl > 0f)
+            if (airControl > 0f)
                 AirControl(wishDir, airControlTargetSpeed, dt);
 
-            m_PlayerVelocity.y -= m_Gravity * dt;
+            m_PlayerVelocity.y -= gravity * dt;
         }
 
         /// <summary>Quake-style air steering that changes horizontal direction without altering vertical velocity.</summary>
@@ -434,7 +442,7 @@ namespace Q3Movement
             if (dot <= 0f)
                 return;
 
-            float steer = 32f * m_AirControl * dot * dot * dt;
+            float steer = 32f * airControl * dot * dot * dt;
             Vector3 steeredVelocity = velocityDir * speed + targetDir * steer;
             if (steeredVelocity.sqrMagnitude > 0.0001f)
                 steeredVelocity = steeredVelocity.normalized * speed;
@@ -448,7 +456,7 @@ namespace Q3Movement
             PlayJumpSound();
 
             // Preserve horizontal momentum but replace the slope-following vertical component.
-            m_PlayerVelocity.y = m_JumpForce;
+            m_PlayerVelocity.y = jumpForce;
             m_IsGrounded = false;
             m_OnSteepSlope = false;
             m_TimeSinceGrounded = m_CoyoteTime + 1f;
@@ -568,10 +576,10 @@ namespace Q3Movement
                 return;
             }
 
-            float control = speed < m_GroundSettings.Deceleration
-                ? m_GroundSettings.Deceleration
+            float control = speed < groundDeceleration
+                ? groundDeceleration
                 : speed;
-            float drop = control * m_Friction * dt * frictionScale;
+            float drop = control * friction * dt * frictionScale;
             float newSpeed = Mathf.Max(0f, speed - drop);
 
             m_PlayerFriction = newSpeed;

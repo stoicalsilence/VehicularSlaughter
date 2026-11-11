@@ -5,6 +5,7 @@ using UnityEngine.UI;
 public sealed class CarHealthMeter : MonoBehaviour
 {
     public CarController car;
+    public CarStats carStats;
 
     public Image carHPMeterImage;
     public TextMeshProUGUI carHealthText;
@@ -43,7 +44,7 @@ public sealed class CarHealthMeter : MonoBehaviour
 
     private float GetTargetFill()
     {
-        float maxHealth = Mathf.Max(1f, car.maxVehicleHealth);
+        float maxHealth = Mathf.Max(1f, carStats.maxVehicleHealth);
 
         return Mathf.Clamp01(
             car.currentVehicleHealth / maxHealth
@@ -63,7 +64,7 @@ public sealed class CarHealthMeter : MonoBehaviour
         {
             carHealthText.text =
                 $"{Mathf.CeilToInt(car.currentVehicleHealth)} / " +
-                $"{Mathf.CeilToInt(car.maxVehicleHealth)}";
+                $"{Mathf.CeilToInt(carStats.maxVehicleHealth)}";
         }
     }
 }

@@ -14,6 +14,9 @@ using UnityEngine;
 public sealed class PlayerGun : MonoBehaviour
 {
     [Header("References")]
+
+    public PlayerStats playerStats;
+
     [Tooltip("The player's first-person camera. Auto-found in children when left empty.")]
     [SerializeField] private Camera playerCamera;
 
@@ -29,52 +32,28 @@ public sealed class PlayerGun : MonoBehaviour
     [SerializeField] private GameObject muzzleFlash;
 
 
-    [Header("Offensive Stats")]
-    [Min(0f)]
-    [SerializeField] private float damagePerPellet = 10f;
+    public float damagePerPellet => playerStats.gunDamagePerPellet;
 
-    [Tooltip("Number of independent hitscan rays fired for each trigger pull. Set above 1 for a shotgun-style weapon.")]
-    [Min(1)]
-    [SerializeField] private int pelletsPerShot = 1;
+    public int pelletsPerShot => playerStats.gunPelletsPerShot;
 
-    [Min(0f)]
-    [SerializeField] private float knockbackForce = 5f;
+    public float knockbackForce => playerStats.gunKnockbackForce;
 
-    [Tooltip("Shots fired per second. For a multi-pellet shot, this is still one trigger shot.")]
-    [Min(0.01f)]
-    [SerializeField] private float fireRate = 6f;
+    public float fireRate => playerStats.gunFireRate;
 
-    [Tooltip("Maximum angular spread, in degrees, applied independently to each pellet.")]
-    [Range(0f, 30f)]
-    [SerializeField] private float accuracySpreadDegrees = 1.25f;
+    public float accuracySpreadDegrees => playerStats.gunAccuracySpreadDegrees;
 
-    [Tooltip("When enabled, holding the fire button repeats shots. Disable for semi-automatic weapons.")]
-    [SerializeField] private bool automaticFire = true;
+    public bool automaticFire = true;
 
-    [Header("Critical Hit Stats")]
+    public float criticalChance => playerStats.gunCriticalChance;
 
-    [Tooltip("Critical hit chance in percent. Can exceed 100% for over-critting.")]
-    [Min(0f)]
-    [SerializeField] public float criticalChance = 0f;
+    public float criticalDamageMultiplier => playerStats.gunCriticalDamageMultiplier;
+    
+    public int magazineSize => playerStats.gunMagazineSize;
+    public float reloadDuration => playerStats.gunReloadDuration;
 
-    [Tooltip("Damage multiplier applied for EACH critical hit. 2 = double damage.")]
-    [Min(1f)]
-    [SerializeField] public float criticalDamageMultiplier = 2f;
+    public bool reloadAutomaticallyWhenEmpty = true; 
 
-
-    [Header("Magazine Stats")]
-    [Min(1)]
-    [SerializeField] public int magazineSize = 30;
-
-    [Min(0.01f)]
-    [SerializeField] private float reloadDuration = 2.2f;
-
-    [SerializeField] private bool reloadAutomaticallyWhenEmpty = true;
-
-
-    [Header("Range Stats")]
-    [Min(0.1f)]
-    [SerializeField] private float maxShotDistance = 60f;
+    public float maxShotDistance => playerStats.gunMaxShotDistance;
 
 
     [Header("Input")]
@@ -107,28 +86,22 @@ public sealed class PlayerGun : MonoBehaviour
 
 
     [Header("Weapon Animation")]
-    [Tooltip("Full Animator state path, usually 'Base Layer.Idle'. This should be the default looping state.")]
     [SerializeField] private AnimationClip idleAnim;
 
-    [Tooltip("Full Animator state path, usually 'Base Layer.Fire'. This should be a non-looping one-shot state that returns to Idle.")]
     [SerializeField] private AnimationClip shootAnim;
 
-    [Tooltip("Full Animator state path, usually 'Base Layer.Reload'. PlayerGun returns to Idle when the gameplay reload timer completes.")]
     [SerializeField] private AnimationClip reloadAnim;
 
     [Tooltip("Animator layer containing the Idle, Fire and Reload states. Usually 0 (Base Layer).")]
     [Min(0)]
     [SerializeField] private int animatorLayer = 0;
 
-    [Tooltip("Blend time used when entering Fire or Reload and when returning to Idle.")]
     [Min(0f)]
     [SerializeField] private float animationBlendTime = 0.04f;
 
-    [Tooltip("The reload clip's duration in seconds when played at 1x speed. Set this to the actual reload clip length.")]
     [Min(0.01f)]
     [SerializeField] private float reloadAnimationReferenceDuration = 2.2f;
 
-    [Tooltip("Float parameter used as the Reload state's Speed Multiplier. Create this as a Float in the Animator Controller.")]
     [SerializeField] private string reloadSpeedParameter = "ReloadSpeed";
 
 
@@ -194,57 +167,6 @@ public sealed class PlayerGun : MonoBehaviour
     private float originalAnimatorSpeed = 1f;
     private bool usingAnimatorSpeedFallback;
 
-
-    public int CurrentAmmo => currentAmmo;
-    public bool IsReloading => isReloading;
-    public int MagazineSize => magazineSize;
-    public bool CanFire => CanUseWeapon && !isReloading && currentAmmo > 0;
-
-
-    // Read/write stat properties let a future upgrade system change the weapon at runtime.
-    public float DamagePerPellet
-    {
-        get => damagePerPellet;
-        set => damagePerPellet = Mathf.Max(0f, value);
-    }
-
-    public int PelletsPerShot
-    {
-        get => pelletsPerShot;
-        set => pelletsPerShot = Mathf.Max(1, value);
-    }
-
-    public float KnockbackForce
-    {
-        get => knockbackForce;
-        set => knockbackForce = Mathf.Max(0f, value);
-    }
-
-    public float FireRate
-    {
-        get => fireRate;
-        set => fireRate = Mathf.Max(0.01f, value);
-    }
-
-    public float AccuracySpreadDegrees
-    {
-        get => accuracySpreadDegrees;
-        set => accuracySpreadDegrees = Mathf.Clamp(value, 0f, 30f);
-    }
-
-    public float ReloadDuration
-    {
-        get => reloadDuration;
-        set => reloadDuration = Mathf.Max(0.01f, value);
-    }
-
-    public float MaxShotDistance
-    {
-        get => maxShotDistance;
-        set => maxShotDistance = Mathf.Max(0.1f, value);
-    }
-
-
     private bool CanUseWeapon
     {
         get
@@ -260,6 +182,16 @@ public sealed class PlayerGun : MonoBehaviour
 
     private void Awake()
     {
+        if (playerStats == null)
+            playerStats = GetComponentInParent<PlayerStats>();
+
+        if (playerStats == null)
+        {
+            Debug.LogError("PlayerGun: PlayerStats not found!", this);
+            enabled = false;
+            return;
+        }
+
         if (playerCamera == null)
             playerCamera = GetComponentInChildren<Camera>(true);
 
