@@ -96,6 +96,15 @@ public sealed class PlayerHealth : MonoBehaviour
         DetectEnemiesTouchingPlayer();
     }
 
+    private void Update()
+    {
+        if (playerStats.hpRegeneration > 0)
+        {
+            currentHealth += playerStats.hpRegeneration / 600;
+            if (currentHealth > MaxHealth) currentHealth = MaxHealth;
+        }
+    }
+
     private void DetectEnemiesTouchingPlayer()
     {
         if (characterController == null || currentHealth <= 0f)

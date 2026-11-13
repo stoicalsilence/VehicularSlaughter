@@ -81,6 +81,7 @@ public sealed class DamageNumberPool : MonoBehaviour
             text.name = "Pooled Damage Number " + i;
             text.alignment = TextAlignmentOptions.Center;
             text.enableWordWrapping = false;
+            text.overflowMode = TextOverflowModes.Overflow;
             text.richText = false;
             text.gameObject.SetActive(false);
 
@@ -184,12 +185,19 @@ public sealed class DamageNumberPool : MonoBehaviour
         number.lateralOffset =
             driftDirection * Random.Range(lateralDrift * 0.55f, lateralDrift);
 
-        // Add one exclamation mark on each side for every critical tier.
-        string criticalMarks = new string('!', Mathf.Max(0, criticalHits));
+        // Critical markers appear underneath the damage number.
         string damageText = Mathf.RoundToInt(damage).ToString();
 
-        number.text.text =
-            criticalMarks + damageText + criticalMarks;
+        if (criticalHits > 0)
+        {
+            string criticalMarks = new string('!', criticalHits);
+
+            number.text.text = damageText + "\n" + criticalMarks;
+        }
+        else
+        {
+            number.text.text = damageText;
+        }
 
         number.text.color = number.color;
 

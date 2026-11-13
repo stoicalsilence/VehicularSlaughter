@@ -36,7 +36,7 @@ TagManager:
   - 
   - 
   - 
-  - 
+  - ItemPreview
   - 
   m_SortingLayers:
   - name: Default

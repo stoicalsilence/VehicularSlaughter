@@ -168,5 +168,23 @@ namespace Q3Movement
             q.x = Mathf.Tan(0.5f * Mathf.Deg2Rad * angleX);
             return q;
         }
+
+        public void ResetStrafeTilt(Transform camera)
+        {
+            // Stop any active tween so it cannot modify the roll afterward.
+            if (m_StrafeTiltTween != null && m_StrafeTiltTween.IsActive())
+                m_StrafeTiltTween.Kill(false);
+
+            m_StrafeTiltTween = null;
+
+            // Reset both the current and requested roll.
+            m_CurrentStrafeRoll = 0f;
+            m_RequestedStrafeRoll = 0f;
+
+            // Restore the camera rotation without the strafe roll.
+            if (camera != null)
+                camera.localRotation = m_CameraTargetRot;
+        }
     }
+
 }

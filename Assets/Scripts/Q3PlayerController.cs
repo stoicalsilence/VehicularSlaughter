@@ -19,7 +19,7 @@ namespace Q3Movement
 
         [Header("Movement")]
         [Tooltip("Automatically jump again while the jump button remains held.")]
-        [SerializeField] private bool m_AutoBunnyHop = false;
+        [SerializeField] public bool m_AutoBunnyHop = false;
 
         [Header("Terrain Grounding")]
         [Tooltip("Include terrain and walkable ground layers. For best results, use only ground/terrain layers.")]
@@ -132,6 +132,9 @@ namespace Q3Movement
 
         private void Update()
         {
+            if (Time.timeScale <= 0f)
+                return;
+
             if (m_Character == null)
                 return;
 
@@ -584,6 +587,11 @@ namespace Q3Movement
 
             m_PlayerFriction = newSpeed;
             m_PlayerVelocity = surfaceVelocity * (newSpeed / speed);
+        }
+
+        public void ResetMouseLookStrafeTilt(Transform camera)
+        {
+            m_MouseLook.ResetStrafeTilt(camera);
         }
 
         /// <summary>Accelerates along a normalized direction, preserving Quake-style speed gain.</summary>

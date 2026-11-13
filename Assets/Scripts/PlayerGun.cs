@@ -1,4 +1,5 @@
 using DG.Tweening;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -16,6 +17,8 @@ public sealed class PlayerGun : MonoBehaviour
     [Header("References")]
 
     public PlayerStats playerStats;
+    private PlayerInventory playerInventory;
+    private PlayerHealth playerHealth;
 
     [Tooltip("The player's first-person camera. Auto-found in children when left empty.")]
     [SerializeField] private Camera playerCamera;
@@ -31,7 +34,14 @@ public sealed class PlayerGun : MonoBehaviour
 
     [SerializeField] private GameObject muzzleFlash;
 
+    [Header("Audio")]
+    [SerializeField] private AudioClip critSound;
+    [SerializeField] private AudioClip overcritSound;
+    [SerializeField] private AudioClip overcritSound2;
+    [SerializeField] private AudioClip overcritSound3;
+    [SerializeField] private AudioClip overcritSound4;
 
+    private int evilEyeHitStacks;
     public float damagePerPellet => playerStats.gunDamagePerPellet;
 
     public int pelletsPerShot => playerStats.gunPelletsPerShot;
@@ -209,12 +219,18 @@ public sealed class PlayerGun : MonoBehaviour
         if (playerCamera == null)
             Debug.LogError("PlayerGun: Assign the player's first-person camera.", this);
 
+        playerInventory = GetComponent<PlayerInventory>();
+        playerHealth = GetComponent<PlayerHealth>();
+
         CacheAnimatorData();
     }
 
 
     private void Update()
     {
+        if (Time.timeScale <= 0f)
+            return;
+
         UpdateMuzzleFlash();
 
         // Cancel a reload if the player enters a vehicle midway through it.
@@ -428,11 +444,24 @@ public sealed class PlayerGun : MonoBehaviour
 
         PlayFireAnimation();
 
-        // Each pellet gets its own spread direction and ray. The camera ray chooses
-        // the crosshair aim point; the muzzle ray then checks the actual line of fire
-        // so the weapon cannot shoot through nearby cover because of camera offset.
+        bool hasEvilEye = playerInventory != null &&
+                          playerInventory.HasItemByName("Evil Eye");
+
+        // Do not carry an old bonus into a newly equipped Evil Eye.
+        if (!hasEvilEye)
+            evilEyeHitStacks = 0;
+
+        bool hitAnyDamageable = false;
+
         for (int i = 0; i < Mathf.Max(1, pelletsPerShot); i++)
-            FirePellet(shotOrigin);
+        {
+            if (FirePellet(shotOrigin))
+                hitAnyDamageable = true;
+        }
+
+        // Reset once per trigger pull, not once per pellet.
+        if (!hitAnyDamageable)
+            evilEyeHitStacks = 0;
 
         currentAmmo = Mathf.Max(0, currentAmmo - 1);
         nextShotTime = Time.time + 1f / Mathf.Max(0.01f, fireRate);
@@ -442,54 +471,153 @@ public sealed class PlayerGun : MonoBehaviour
 
         if (fireSound != null)
         {
-            AudioManager.Play2D(
-                fireSound,
-                fireSoundVolume);
+            AudioManager.Play2D(fireSound, fireSoundVolume);
         }
 
         if (currentAmmo <= 0 && reloadAutomaticallyWhenEmpty)
             BeginReload();
     }
 
-
-    private void FirePellet(Vector3 shotOrigin)
+    private bool FirePellet(Vector3 shotOrigin)
     {
-        Vector3 cameraDirection = ApplyAccuracySpread(playerCamera.transform.forward);
-        Ray cameraRay = new Ray(playerCamera.transform.position, cameraDirection);
+        Vector3 cameraDirection = ApplyAccuracySpread(
+            playerCamera.transform.forward);
 
-        Vector3 aimPoint = cameraRay.origin + cameraRay.direction * maxShotDistance;
+        Ray cameraRay = new Ray(
+            playerCamera.transform.position,
+            cameraDirection);
 
-        if (Physics.Raycast(
+        // Find the first non-damageable obstruction.
+        // Damageable targets do not stop the camera aiming ray.
+        float cameraAimDistance = maxShotDistance;
+
+        RaycastHit[] cameraHits = Physics.RaycastAll(
             cameraRay,
-            out RaycastHit cameraHit,
             maxShotDistance,
             shotLayers,
-            QueryTriggerInteraction.Ignore))
+            QueryTriggerInteraction.Ignore);
+
+        System.Array.Sort(
+            cameraHits,
+            (a, b) => a.distance.CompareTo(b.distance));
+
+        foreach (RaycastHit cameraHit in cameraHits)
         {
-            aimPoint = cameraHit.point;
+            ITurretDamageable damageable =
+                cameraHit.collider.GetComponentInParent<ITurretDamageable>();
+
+            if (damageable != null)
+                continue;
+
+            cameraAimDistance = cameraHit.distance;
+            break;
         }
+
+        Vector3 aimPoint =
+            cameraRay.origin + cameraRay.direction * cameraAimDistance;
 
         Vector3 muzzleToAimPoint = aimPoint - shotOrigin;
         float muzzleRayDistance = muzzleToAimPoint.magnitude;
 
         if (muzzleRayDistance <= 0.001f)
-            return;
+            return false;
 
-        Vector3 muzzleDirection = muzzleToAimPoint / muzzleRayDistance;
+        Vector3 muzzleDirection =
+            muzzleToAimPoint / muzzleRayDistance;
 
-        if (Physics.Raycast(
+        // Collect all hits along the complete trajectory.
+        RaycastHit[] hits = Physics.RaycastAll(
             shotOrigin,
             muzzleDirection,
-            out RaycastHit hit,
             muzzleRayDistance + 0.02f,
             shotLayers,
-            QueryTriggerInteraction.Ignore))
+            QueryTriggerInteraction.Ignore);
+
+        System.Array.Sort(
+            hits,
+            (a, b) => a.distance.CompareTo(b.distance));
+
+        int piercesRemaining = Mathf.Max(
+            0,
+            Mathf.FloorToInt(playerStats.pierces));
+
+        int enemiesHit = 0;
+
+        // Prevent multiple colliders on the same enemy from counting separately.
+        HashSet<Transform> hitTargets = new HashSet<Transform>();
+
+        bool hitAnyDamageable = false;
+
+        bool hasEvilEye = playerInventory != null &&
+                          playerInventory.HasItemByName("Evil Eye");
+
+        int evilEyeItemStacks = hasEvilEye
+            ? playerInventory.GetStacksByName("Evil Eye")
+            : 0;
+
+        foreach (RaycastHit hit in hits)
         {
+            Transform target = hit.collider.transform.root;
+
+            if (!hitTargets.Add(target))
+                continue;
+
             int criticalHits = RollCriticalHits();
+
+            switch (criticalHits)
+            {
+                case 1:
+                    AudioManager.Play3D(
+                        critSound, hit.point, impactSoundVolume, 1, 20, 50);
+                    break;
+
+                case 2:
+                    AudioManager.Play3D(
+                        overcritSound, hit.point, impactSoundVolume, 1, 20, 50);
+                    break;
+
+                case 3:
+                    AudioManager.Play3D(
+                        overcritSound2, hit.point, impactSoundVolume, 1, 20, 50);
+                    break;
+
+                case 4:
+                    AudioManager.Play3D(
+                        overcritSound3, hit.point, impactSoundVolume, 0.8f, 20, 50);
+                    break;
+
+                case 5:
+                    AudioManager.Play3D(
+                        overcritSound4, hit.point, impactSoundVolume, 1, 20, 50);
+                    break;
+            }
 
             float finalDamage = CalculateCriticalDamage(
                 damagePerPellet,
                 criticalHits);
+
+            // Apply the Evil Eye bonus using the current hit streak.
+            if (hasEvilEye)
+            {
+                float evilEyeExtraDamage =
+                    5f * evilEyeItemStacks * evilEyeHitStacks;
+
+                finalDamage += evilEyeExtraDamage;
+            }
+
+            if (playerHealth != null &&
+                playerInventory != null &&
+                playerHealth.CurrentHealth <= playerHealth.MaxHealth / 2f)
+            {
+                int stackCount =
+                    playerInventory.GetStacksByName("Angerjuice Injection");
+
+                float damageMultiplier = 1f + (0.5f * stackCount);
+
+                finalDamage *= damageMultiplier;
+            }
+
+            finalDamage += GetBonusSodaDamage();
 
             bool hitDamageable = ApplyDamage(
                 hit,
@@ -497,7 +625,24 @@ public sealed class PlayerGun : MonoBehaviour
                 criticalHits);
 
             PlayImpactEffect(hit, hitDamageable);
+
+            // Non-damageable objects block bullets but do not consume enemy pierces.
+            if (!hitDamageable)
+                break;
+
+            hitAnyDamageable = true;
+            enemiesHit++;
+
+            // Increase Evil Eye's hit streak after applying this hit's damage.
+            if (hasEvilEye)
+                evilEyeHitStacks++;
+
+            // Initial enemy hit + additional pierces.
+            if (enemiesHit > piercesRemaining)
+                break;
         }
+
+        return hitAnyDamageable;
     }
 
 
@@ -767,5 +912,18 @@ public sealed class PlayerGun : MonoBehaviour
         return baseDamage * Mathf.Pow(
             Mathf.Max(1f, criticalDamageMultiplier),
             criticalHits);
+    }
+
+    private float GetBonusSodaDamage()
+    {
+        if (playerStats == null || playerInventory == null)
+            return 0f;
+
+        if (!playerInventory.HasItemByName("Bonus Soda"))
+            return 0f;
+
+        int stacks = playerInventory.GetStacksByName("Bonus Soda");
+
+        return playerStats.maxHealth * 0.2f * stacks;
     }
 }

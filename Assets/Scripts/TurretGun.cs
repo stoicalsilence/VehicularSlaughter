@@ -12,6 +12,8 @@ public class TurretGun : MonoBehaviour
 {
     [Header("References")]
     public CarStats carStats;
+    private PlayerStats playerStats;
+    private PlayerInventory playerInventory;
 
     [Tooltip("Transform that rotates to aim and moves into the reload pose.")]
     public Transform GunVisual;
@@ -116,6 +118,11 @@ public class TurretGun : MonoBehaviour
 
     [Header("Audio")]
     [SerializeField] private AudioClip fireSound;
+    [SerializeField] private AudioClip critSound;
+    [SerializeField] private AudioClip overcritSound;
+    [SerializeField] private AudioClip overcritSound2;
+    [SerializeField] private AudioClip overcritSound3;
+    [SerializeField] private AudioClip overcritSound4;
 
     [Range(0f, 1f)]
     [SerializeField] private float fireSoundVolume = 1f;
@@ -203,9 +210,18 @@ public class TurretGun : MonoBehaviour
         }
     }
 
+    private void Start()
+    {
+        playerStats = FindObjectOfType<PlayerStats>();
+        playerInventory = FindObjectOfType<PlayerInventory>();
+    }
+
 
     private void Update()
     {
+        if (Time.timeScale <= 0f)
+            return;
+
         UpdateMuzzleFlash();
         UpdateBulletTracer();
         UpdateTarget();
@@ -542,12 +558,43 @@ public class TurretGun : MonoBehaviour
                 damagePerShot,
                 criticalHits);
 
+            finalDamage += GetBonusSodaDamage();
+
             ApplyDamage(hit, finalDamage, criticalHits);
 
             if (hit.collider.gameObject.layer == 7)
             {
                 GameObject sparks = Instantiate(metalSparkParticles, hit.point, Quaternion.identity);
                 Destroy(sparks, 5);
+
+                switch (criticalHits)
+                {
+                    case 1:
+                        AudioManager.Play3D(
+                        critSound,
+                        hit.point,
+                        impactSoundVolume, 1, 20, 50); break;
+                    case 2:
+                        AudioManager.Play3D(
+                        overcritSound,
+                        hit.point,
+                        impactSoundVolume, 1, 20, 50); break;
+                    case 3:
+                        AudioManager.Play3D(
+                        overcritSound2,
+                        hit.point,
+                        impactSoundVolume, 1, 20, 50); break;
+                    case 4:
+                        AudioManager.Play3D(
+                        overcritSound3,
+                        hit.point,
+                        impactSoundVolume, 0.8f, 20, 50); break;
+                    case 5:
+                        AudioManager.Play3D(
+                        overcritSound4,
+                        hit.point,
+                        impactSoundVolume, 1, 20, 50); break;
+                }
             }
             else
             {
@@ -845,5 +892,18 @@ public class TurretGun : MonoBehaviour
         return baseDamage * Mathf.Pow(
             Mathf.Max(1f, criticalDamageMultiplier),
             criticalHits);
+    }
+
+    private float GetBonusSodaDamage()
+    {
+        if (playerStats == null || playerInventory == null)
+            return 0f;
+
+        if (!playerInventory.HasItemByName("Bonus Soda"))
+            return 0f;
+
+        int stacks = playerInventory.GetStacksByName("Bonus Soda");
+
+        return playerStats.maxHealth * 0.2f * stacks;
     }
 }

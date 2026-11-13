@@ -154,11 +154,20 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         previousPlayerCameraEnabled = playerCamera != null && playerCamera.enabled;
         previousPlayerAudioListenerEnabled = playerAudioListener != null && playerAudioListener.enabled;
 
+        // Reset camera roll before disabling the player controller.
+        if (playerController != null && playerCamera != null)
+        {
+            playerController.ResetMouseLookStrafeTilt(playerCamera.transform);
+        }
+
         // Stop player movement/collision before teleporting the player root into the vehicle.
         if (playerController != null)
         {
             playerController.enabled = false;
-            playerController.SendMessage("ResetMovementState", SendMessageOptions.DontRequireReceiver);
+            playerController.SendMessage(
+                "ResetMovementState",
+                SendMessageOptions.DontRequireReceiver
+            );
         }
 
         if (characterController != null)

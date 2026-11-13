@@ -31,6 +31,8 @@ public sealed class CarStats : MonoBehaviour
     [SerializeField, Min(0f)] public float maximumVehicleDamagePerHit = 10f;
     [SerializeField, Min(0.05f)] public float enemyContactDamageCooldown = 1f;
     [SerializeField, Min(0f)] public float vehicleThornsDamage = 5f;
+    [SerializeField, Min(0f)] public float carExplosionDamage = 100f;
+    [SerializeField, Min(0f)] public float carExplosionDamageRange = 15f;
 
     [Header("Mounted Turret")]
     [SerializeField, Min(0f)] public float turretDamagePerShot = 10f;

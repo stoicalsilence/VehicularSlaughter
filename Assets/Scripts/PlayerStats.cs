@@ -13,6 +13,7 @@ public sealed class PlayerStats : MonoBehaviour
     [SerializeField, Min(1f)] public float maxHealth = 100f;
     [SerializeField, Min(0f)] public float damageCooldown = 0.75f;
     [SerializeField, Min(0f)] public float thornsDamage = 5f;
+    [SerializeField, Min(0f)] public float hpRegeneration = 0f;
 
     [Header("Movement")]
     [SerializeField, Min(0f)] public float groundMoveSpeed = 7f;
@@ -40,6 +41,11 @@ public sealed class PlayerStats : MonoBehaviour
     [SerializeField, Min(1)] public int gunMagazineSize = 30;
     [SerializeField, Min(0.01f)] public float gunReloadDuration = 2.2f;
     [SerializeField, Min(0.1f)] public float gunMaxShotDistance = 60f;
+    [SerializeField, Min(0f)] public float pierces = 0f;
+
+    [Header("Misc")]
+    [SerializeField, Min(0f)] public float itemLuck = 0f;
+    [SerializeField, Min(0f)] public float xpGain = 0f;
 
     /// <summary>Raised when max health changes. Arguments are old max and new max.</summary>
     public event Action<float, float> MaxHealthChanged;
@@ -71,6 +77,7 @@ public sealed class PlayerStats : MonoBehaviour
         maxHealth = Mathf.Max(1f, maxHealth);
         damageCooldown = Mathf.Max(0f, damageCooldown);
         thornsDamage = Mathf.Max(0f, thornsDamage);
+        hpRegeneration = Mathf.Max(0f, hpRegeneration);
 
         groundMoveSpeed = Mathf.Max(0f, groundMoveSpeed);
         groundAcceleration = Mathf.Max(0f, groundAcceleration);
@@ -95,5 +102,8 @@ public sealed class PlayerStats : MonoBehaviour
         gunMagazineSize = Mathf.Max(1, gunMagazineSize);
         gunReloadDuration = Mathf.Max(0.01f, gunReloadDuration);
         gunMaxShotDistance = Mathf.Max(0.1f, gunMaxShotDistance);
+
+        itemLuck = Mathf.Max(0f, itemLuck);
+        xpGain = Mathf.Max(1f, xpGain);
     }
 }
