@@ -47,6 +47,13 @@ public sealed class PlayerStats : MonoBehaviour
     [SerializeField, Min(0f)] public float itemLuck = 0f;
     [SerializeField, Min(0f)] public float xpGain = 0f;
 
+    [Header("Radio")]
+    public float radioChargeRate = 0.25f;
+    public float radioRepositionCooldown = 20f;
+    public float radioRespawnCooldown = 60f;
+    public float radioAirstrikeCooldown = 120f;
+    public float radioAirstrikeDelay = 3f;
+
     /// <summary>Raised when max health changes. Arguments are old max and new max.</summary>
     public event Action<float, float> MaxHealthChanged;
 
@@ -105,5 +112,11 @@ public sealed class PlayerStats : MonoBehaviour
 
         itemLuck = Mathf.Max(0f, itemLuck);
         xpGain = Mathf.Max(1f, xpGain);
+
+        radioChargeRate = Mathf.Max(0.01f, radioChargeRate);
+        radioRepositionCooldown = Mathf.Max(0f, radioRepositionCooldown);
+        radioRespawnCooldown = Mathf.Max(0f, radioRespawnCooldown);
+        radioAirstrikeCooldown = Mathf.Max(0f, radioAirstrikeCooldown);
+        radioAirstrikeDelay = Mathf.Max(0f, radioAirstrikeDelay);
     }
 }

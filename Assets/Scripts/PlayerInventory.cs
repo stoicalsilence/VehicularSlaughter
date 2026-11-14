@@ -671,6 +671,9 @@ public sealed class PlayerInventory : MonoBehaviour
         ApplyPlayerStatModifiers(item, 1);
         ApplyPendingCarStatModifiers();
 
+        // Check whether collecting this item unlocks Cauldron milestones.
+        UpdateCauldronBonus();
+
         InventoryChanged?.Invoke();
 
         return true;
@@ -1514,7 +1517,50 @@ public sealed class PlayerInventory : MonoBehaviour
 
     public void ReportKill(GameObject target)
     {
+        if (target == null)
+            return;
+
+        totalEnemiesKilled++;
+
+        UpdateCauldronBonus();
+
         OnItemKill?.Invoke(target);
+    }
+
+    private void UpdateCauldronBonus()
+    {
+        if (playerStats == null || !HasItemByName("Cauldron"))
+            return;
+
+        int cauldronStacks = GetStacksByName("Cauldron");
+
+        int killsRequired = Mathf.Max(1, cauldronKillsPerHealth);
+
+        // Calculate the total health bonus earned so far.
+        int milestonesReached = totalEnemiesKilled / killsRequired;
+
+        int totalEarnedHealth = milestonesReached * cauldronStacks;
+
+        // Only apply newly earned health.
+        int healthToAdd = totalEarnedHealth - cauldronBonusHealthGranted;
+
+        if (healthToAdd <= 0)
+            return;
+
+        float currentMaxHealth =
+            GetStatValue(PlayerStatToModify.MaxHealth, "Cauldron");
+
+        SetStatValue(
+            PlayerStatToModify.MaxHealth,
+            currentMaxHealth + healthToAdd);
+
+        cauldronBonusHealthGranted = totalEarnedHealth;
+
+        Debug.Log(
+            $"Cauldron: +{healthToAdd} Max HP! " +
+            $"Total kills: {totalEnemiesKilled}, " +
+            $"Total Cauldron bonus: +{cauldronBonusHealthGranted} HP.",
+            this);
     }
 
     // ==================================================

@@ -10,6 +10,8 @@ namespace Q3Movement
     [RequireComponent(typeof(CharacterController))]
     public class Q3PlayerController : MonoBehaviour
     {
+        public PlayerInventory playerInventory;
+
         [Header("Aiming")]
         [SerializeField] private Camera m_Camera;
         [SerializeField] private MouseLook m_MouseLook = new MouseLook();
@@ -642,6 +644,14 @@ namespace Q3Movement
                 return;
 
             m_MouseLook.Init(m_Tran, m_CamTran);
+        }
+
+        private void OnControllerColliderHit(ControllerColliderHit hit)
+        {
+            if (hit.gameObject.TryGetComponent<ItemCrate>(out ItemCrate crate))
+            {
+                playerInventory.TryOpenCrate(crate);
+            }
         }
     }
 }

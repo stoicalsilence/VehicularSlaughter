@@ -110,6 +110,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     [Header("Death")]
     public DeathParticlePool deathParticlePool;
+    public PlayerInventory playerInventory;
 
     [SerializeField]
     private AudioClip deathSound;
@@ -881,6 +882,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         StopHitFlash(true);
 
+        playerInventory.ReportKill(gameObject);
+
         // Spawn pooled death particles.
         if (deathParticlePool != null)
         {
@@ -909,6 +912,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             Destroy(gameObject);
         }
     }
+
     private void DropXP()
     {
         xpBlobPool.Spawn(transform.position, xpDropValue);

@@ -11,6 +11,7 @@ public sealed class HordeManager : MonoBehaviour
     [SerializeField] private Transform player;
     [SerializeField] private HordeEnemy enemyPrefab;
     [SerializeField] private XPBlobPool xpBlobPool;
+    [SerializeField] private PlayerInventory playerInventory;
     [SerializeField] private DeathParticlePool deathParticlePool;
 
     [Header("Enemy Pool")]
@@ -241,6 +242,7 @@ public sealed class HordeManager : MonoBehaviour
         enemy.gameObject.SetActive(true);
         enemy.xpBlobPool = xpBlobPool;
         enemy.deathParticlePool = deathParticlePool;
+        enemy.playerInventory = playerInventory;
 
         // Moving to an active parent initializes the enemy.
         enemy.transform.SetParent(transform, false);
