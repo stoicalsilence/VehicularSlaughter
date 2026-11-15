@@ -53,6 +53,9 @@ public sealed class PlayerStats : MonoBehaviour
     public float radioRespawnCooldown = 60f;
     public float radioAirstrikeCooldown = 120f;
     public float radioAirstrikeDelay = 3f;
+    public float radioAirstrikeScale = 2f;
+    public float radioAirstrikeDamage = 100f;
+    public float radioAirstrikeDamageMultiplier = 1f;
 
     /// <summary>Raised when max health changes. Arguments are old max and new max.</summary>
     public event Action<float, float> MaxHealthChanged;
@@ -118,5 +121,8 @@ public sealed class PlayerStats : MonoBehaviour
         radioRespawnCooldown = Mathf.Max(0f, radioRespawnCooldown);
         radioAirstrikeCooldown = Mathf.Max(0f, radioAirstrikeCooldown);
         radioAirstrikeDelay = Mathf.Max(0f, radioAirstrikeDelay);
+        radioAirstrikeScale = Mathf.Max(1f, radioAirstrikeScale);
+        radioAirstrikeDamage = Mathf.Max(0f, radioAirstrikeDamage);
+        radioAirstrikeDamageMultiplier = Mathf.Max(0f, radioAirstrikeDamageMultiplier);
     }
 }

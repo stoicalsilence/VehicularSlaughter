@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
+using System.Collections.Generic;
 
 public sealed class PlayerRadio : MonoBehaviour
 {
@@ -14,6 +15,16 @@ public sealed class PlayerRadio : MonoBehaviour
     public PlayerVehicleInteractor vehicleInteractor;
     public Camera playerCamera;
     public CarController carController;
+    public GameObject airstrikePrefab;
+    public GameObject airstrikeExplosion;
+
+    [Header("Airstrike")]
+    public float airstrikeBaseDamageRadius = 5f;
+    public float airstrikeKnockbackForce = 8f;
+    public float airstrikeExplosionLifetime = 3f;
+
+    private readonly HashSet<HordeEnemy> airstrikeHitEnemies =
+        new HashSet<HordeEnemy>();
 
     [Header("Arms")]
     public GameObject weaponArms;
@@ -605,6 +616,121 @@ public sealed class PlayerRadio : MonoBehaviour
         );
 
         AirstrikeRequested?.Invoke(targetPosition);
+
+        StartCoroutine(DoAirstrike(targetPosition));
+    }
+
+    private IEnumerator DoAirstrike(Vector3 airstrikePosition)
+    {
+        int planeHeightOffset = 0;
+        if(playerStats.radioAirstrikeScale > 6)
+        {
+            planeHeightOffset = 6;
+        }
+
+        if (airstrikePrefab != null)
+        {
+            GameObject harrier = Instantiate(
+                airstrikePrefab,
+                airstrikePosition + new Vector3(0, 20 + planeHeightOffset, 0),
+                Quaternion.identity
+            );
+
+            Destroy(harrier, 1.98f);
+        }
+        PlayerInventory pi = FindObjectOfType<PlayerInventory>();
+        bool hasMatchbox = pi.HasItemByName("Matchbox");
+
+
+
+        if (FindObjectOfType<PlayerInventory>().HasItemByName("Matchbox"))
+        {
+            yield return new WaitForSeconds(0.8f);
+
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 20), -0.45f);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 10), -0.3f);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 0), 0);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -10), -0.3f);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -20), -0.45f);
+        }
+        else
+        {
+            yield return new WaitForSeconds(1f);
+
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 10), -0.3f);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 0), 0);
+            yield return new WaitForSeconds(0.2f);
+            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -10), -0.3f);
+        }
+    }
+
+    public void DoAirStrikeExplosion(Vector3 airstrikePosition, float scaleMod)
+    {
+        float scale = playerStats.radioAirstrikeScale;
+
+        float damage =
+            playerStats.radioAirstrikeDamage *
+            playerStats.radioAirstrikeDamageMultiplier;
+
+        float damageRadius = airstrikeBaseDamageRadius * (scale + scaleMod);
+
+        if (airstrikeExplosion != null)
+        {
+            GameObject explosion = Instantiate(
+                airstrikeExplosion,
+                airstrikePosition + new Vector3(0, 2, 0),
+                Quaternion.identity
+            );
+
+            explosion.transform.localScale *= scale;
+
+            // Scale all child particle systems as well.
+            ParticleSystem[] particleSystems =
+                explosion.GetComponentsInChildren<ParticleSystem>(true);
+
+            foreach (ParticleSystem ps in particleSystems)
+            {
+                var main = ps.main;
+                main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            }
+
+            Destroy(explosion, airstrikeExplosionLifetime);
+        }
+
+        if (damage <= 0f || damageRadius <= 0f)
+            return;
+
+        Collider[] hits = Physics.OverlapSphere(
+            airstrikePosition,
+            damageRadius,
+            ~0,
+            QueryTriggerInteraction.Ignore
+        );
+
+        airstrikeHitEnemies.Clear();
+
+        foreach (Collider hit in hits)
+        {
+            HordeEnemy enemy = hit.GetComponentInParent<HordeEnemy>();
+
+            if (enemy == null || enemy.IsDead)
+                continue;
+
+            if (!airstrikeHitEnemies.Add(enemy))
+                continue;
+
+            enemy.TakeDamage(
+                damage,
+                airstrikePosition,
+                airstrikeKnockbackForce,
+                0
+            );
+        }
     }
 
     private void BeginReturn()

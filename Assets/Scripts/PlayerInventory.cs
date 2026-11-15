@@ -55,7 +55,16 @@ public enum PlayerStatToModify
     GunMagazineSize,
     GunReloadDuration,
     GunMaxShotDistance,
-    GunPierces
+    GunPierces,
+
+    RadioChargeRate,
+    RadioRepositionCooldown,
+    RadioRespawnCooldown,
+    RadioAirstrikeCooldown,
+    RadioAirstrikeDelay,
+    RadioAirstrikeScale,
+    RadioAirstrikeDamage,
+    RadioAirstrikeDamageMultiplier,
 }
 
 public enum ItemStatTarget
@@ -826,6 +835,30 @@ public sealed class PlayerInventory : MonoBehaviour
 
             case PlayerStatToModify.GunPierces:
                 return s.pierces;
+
+            case PlayerStatToModify.RadioChargeRate:
+                return s.radioChargeRate;
+
+            case PlayerStatToModify.RadioRepositionCooldown:
+                return s.radioRepositionCooldown;
+
+            case PlayerStatToModify.RadioRespawnCooldown:
+                return s.radioRespawnCooldown;
+
+            case PlayerStatToModify.RadioAirstrikeCooldown:
+                return s.radioAirstrikeCooldown;
+
+            case PlayerStatToModify.RadioAirstrikeDelay:
+                return s.radioAirstrikeDelay;
+
+            case PlayerStatToModify.RadioAirstrikeScale:
+                return s.radioAirstrikeScale;
+
+            case PlayerStatToModify.RadioAirstrikeDamage:
+                return s.radioAirstrikeDamage;
+
+            case PlayerStatToModify.RadioAirstrikeDamageMultiplier:
+                return s.radioAirstrikeDamageMultiplier;
         }
 
         return 0f;
@@ -1177,6 +1210,38 @@ public sealed class PlayerInventory : MonoBehaviour
 
             case PlayerStatToModify.GunPierces:
                 s.pierces = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioChargeRate:
+                s.radioChargeRate = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioRepositionCooldown:
+                s.radioRepositionCooldown = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioRespawnCooldown:
+                s.radioRespawnCooldown = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioAirstrikeCooldown:
+                s.radioAirstrikeCooldown = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioAirstrikeDamage:
+                s.radioAirstrikeDamage = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioAirstrikeDamageMultiplier:
+                s.radioAirstrikeDamageMultiplier = Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioAirstrikeScale:
+                s.radioAirstrikeScale= Mathf.Max(0, value);
+                break;
+
+            case PlayerStatToModify.RadioAirstrikeDelay:
+                s.radioAirstrikeDelay = Mathf.Max(0, value);
                 break;
         }
     }
@@ -1539,7 +1604,7 @@ public sealed class PlayerInventory : MonoBehaviour
         // Calculate the total health bonus earned so far.
         int milestonesReached = totalEnemiesKilled / killsRequired;
 
-        int totalEarnedHealth = milestonesReached * cauldronStacks;
+        int totalEarnedHealth = milestonesReached * cauldronStacks * 4;
 
         // Only apply newly earned health.
         int healthToAdd = totalEarnedHealth - cauldronBonusHealthGranted;
@@ -1555,12 +1620,6 @@ public sealed class PlayerInventory : MonoBehaviour
             currentMaxHealth + healthToAdd);
 
         cauldronBonusHealthGranted = totalEarnedHealth;
-
-        Debug.Log(
-            $"Cauldron: +{healthToAdd} Max HP! " +
-            $"Total kills: {totalEnemiesKilled}, " +
-            $"Total Cauldron bonus: +{cauldronBonusHealthGranted} HP.",
-            this);
     }
 
     // ==================================================
