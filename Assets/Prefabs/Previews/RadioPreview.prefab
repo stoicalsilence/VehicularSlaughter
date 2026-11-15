@@ -94,6 +94,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: -180
       objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: c44e74c5cfcc9a64f833d247917d71ae, type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 2100000, guid: b3598623aae8d8148b6e431fb25f1770, type: 2}
     - target: {fileID: 919132149155446097, guid: c44e74c5cfcc9a64f833d247917d71ae, type: 3}
       propertyPath: m_Name
       value: Radio

@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &4797296474650602807
+--- !u!1 &2069950553797711838
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,46 +8,46 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 5321208660342880141}
-  - component: {fileID: 9112858474441029672}
-  - component: {fileID: 6454669583908850914}
-  - component: {fileID: 7941680979399402543}
-  m_Layer: 0
+  - component: {fileID: 1725478592794332516}
+  - component: {fileID: 2332295292302590657}
+  - component: {fileID: 556490872147146251}
+  - component: {fileID: 3466679279971458758}
+  m_Layer: 30
   m_Name: Coin of Quaternius
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &5321208660342880141
+--- !u!4 &1725478592794332516
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4797296474650602807}
-  m_LocalRotation: {x: 0.000000021855694, y: 0, z: -0, w: 1}
-  m_LocalPosition: {x: 93.21012, y: 8.160542, z: 48.765488}
+  m_GameObject: {fileID: 2069950553797711838}
+  m_LocalRotation: {x: 0.000000013449824, y: 0.788221, z: 0.00000001722712, w: 0.61539227}
+  m_LocalPosition: {x: -0.036071777, y: 0, z: 0.045124054}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 4017976287409241926}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!33 &9112858474441029672
+  m_LocalEulerAnglesHint: {x: 0, y: 104.039, z: 0}
+--- !u!33 &2332295292302590657
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4797296474650602807}
+  m_GameObject: {fileID: 2069950553797711838}
   m_Mesh: {fileID: 0}
---- !u!23 &6454669583908850914
+--- !u!23 &556490872147146251
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4797296474650602807}
+  m_GameObject: {fileID: 2069950553797711838}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -84,13 +84,13 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!114 &7941680979399402543
+--- !u!114 &3466679279971458758
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4797296474650602807}
+  m_GameObject: {fileID: 2069950553797711838}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8233d90336aea43098adf6dbabd606a2, type: 3}
@@ -23383,14 +23383,37 @@ MonoBehaviour:
   assetGuid: 
   m_Mesh: {fileID: 0}
   m_IsSelectable: 1
-  m_SelectedFaces: 0a010000
-  m_SelectedEdges:
-  - a: 461
-    b: 462
-  - a: 462
-    b: 463
-  - a: 463
-    b: 464
-  - a: 464
-    b: 461
-  m_SelectedVertices: cd010000ce010000cf010000d0010000
+  m_SelectedFaces: 
+  m_SelectedEdges: []
+  m_SelectedVertices: 
+--- !u!1 &5861210053045348879
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4017976287409241926}
+  m_Layer: 30
+  m_Name: CoinOfQuaterniusPreview
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4017976287409241926
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5861210053045348879}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 349.2481, y: 10.642499, z: 38.13008}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 1725478592794332516}
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

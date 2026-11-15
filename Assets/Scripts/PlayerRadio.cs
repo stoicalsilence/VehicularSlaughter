@@ -22,6 +22,9 @@ public sealed class PlayerRadio : MonoBehaviour
     public float airstrikeBaseDamageRadius = 5f;
     public float airstrikeKnockbackForce = 8f;
     public float airstrikeExplosionLifetime = 3f;
+    public float airstrikeGhostRotationSpeed = 120f;
+
+    private float airstrikeGhostYaw;
 
     private readonly HashSet<HordeEnemy> airstrikeHitEnemies =
         new HashSet<HordeEnemy>();
@@ -235,7 +238,7 @@ public sealed class PlayerRadio : MonoBehaviour
 
     private void UpdateCharging()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (Input.GetKeyDown(KeyCode.C))
         {
             BeginReturn();
             return;
@@ -297,19 +300,19 @@ public sealed class PlayerRadio : MonoBehaviour
 
         if (charge < 1f / 3f)
         {
-            promptText.text = "HOLD TAB TO CHARGE";
+            promptText.text = "RELEASE TAB TO CALL IN";
         }
         else if (charge < 2f / 3f)
         {
-            promptText.text = "RELEASE TAB: REPOSITION CAR";
+            promptText.text = "REPOSITION CAR";
         }
         else if (charge < 0.9999f)
         {
-            promptText.text = "RELEASE TAB: RESPAWN CAR";
+            promptText.text = "RESPAWN CAR";
         }
         else
         {
-            promptText.text = "RELEASE TAB: AIRSTRIKE";
+            promptText.text = "AIRSTRIKE";
         }
     }
 
@@ -403,23 +406,37 @@ public sealed class PlayerRadio : MonoBehaviour
 
         state = RadioState.Placing;
 
+        if (selectedCall == CallType.Airstrike)
+            airstrikeGhostYaw = 0f;
+
         if (promptText != null)
         {
             promptText.text =
-                "LEFT CLICK: CONFIRM\nRIGHT CLICK: CANCEL";
+                "C: Cancel";
         }
     }
 
     private void UpdatePlacement()
     {
-        UpdatePlacementGhost();
-
-        if (Input.GetKeyDown(KeyCode.Escape) ||
-            Input.GetMouseButtonDown(1))
+        if (Input.GetKeyDown(KeyCode.C) ||
+            (selectedCall != CallType.Airstrike &&
+             Input.GetMouseButtonDown(1)))
         {
             BeginReturn();
             return;
         }
+
+        // Hold right mouse button to rotate the airstrike.
+        if (selectedCall == CallType.Airstrike &&
+            Input.GetMouseButton(1))
+        {
+            airstrikeGhostYaw +=
+                airstrikeGhostRotationSpeed * Time.deltaTime;
+
+            airstrikeGhostYaw = Mathf.Repeat(airstrikeGhostYaw, 360f);
+        }
+
+        UpdatePlacementGhost();
 
         if (Input.GetMouseButtonDown(0))
             ConfirmCallIn();
@@ -445,7 +462,11 @@ public sealed class PlayerRadio : MonoBehaviour
 
         if (selectedCall == CallType.Airstrike)
         {
-            placementRotation = Quaternion.identity;
+            placementRotation = Quaternion.Euler(
+                0f,
+                airstrikeGhostYaw,
+                0f
+            );
 
             placementGhost.transform.SetPositionAndRotation(
                 hit.point + Vector3.up * airstrikeGhostOffset,
@@ -568,7 +589,8 @@ public sealed class PlayerRadio : MonoBehaviour
                 AudioManager.Play2D(airSupportInbound, 0.3f);
 
                 StartCoroutine(AirstrikeDelayRoutine(
-                    placementGroundPoint
+                    placementGroundPoint,
+                    placementRotation
                 ));
 
                 GameObject particles = Instantiate(cashInSelectParticleRed, placementGhost.transform.position + Vector3.up, Quaternion.identity);
@@ -609,7 +631,9 @@ public sealed class PlayerRadio : MonoBehaviour
         Physics.SyncTransforms();
     }
 
-    private IEnumerator AirstrikeDelayRoutine(Vector3 targetPosition)
+    private IEnumerator AirstrikeDelayRoutine(
+    Vector3 targetPosition,
+    Quaternion targetRotation)
     {
         yield return new WaitForSeconds(
             Mathf.Max(0f, playerStats.radioAirstrikeDelay)
@@ -617,11 +641,16 @@ public sealed class PlayerRadio : MonoBehaviour
 
         AirstrikeRequested?.Invoke(targetPosition);
 
-        StartCoroutine(DoAirstrike(targetPosition));
+        StartCoroutine(DoAirstrike(
+            targetPosition,
+            targetRotation
+        ));
     }
 
-    private IEnumerator DoAirstrike(Vector3 airstrikePosition)
+    private IEnumerator DoAirstrike(Vector3 airstrikePosition, Quaternion airstrikeRotation)
     {
+        Vector3 strikeDirection = airstrikeRotation * Vector3.forward;
+
         int planeHeightOffset = 0;
         if(playerStats.radioAirstrikeScale > 6)
         {
@@ -633,7 +662,7 @@ public sealed class PlayerRadio : MonoBehaviour
             GameObject harrier = Instantiate(
                 airstrikePrefab,
                 airstrikePosition + new Vector3(0, 20 + planeHeightOffset, 0),
-                Quaternion.identity
+                airstrikeRotation
             );
 
             Destroy(harrier, 1.98f);
@@ -641,31 +670,35 @@ public sealed class PlayerRadio : MonoBehaviour
         PlayerInventory pi = FindObjectOfType<PlayerInventory>();
         bool hasMatchbox = pi.HasItemByName("Matchbox");
 
-
-
-        if (FindObjectOfType<PlayerInventory>().HasItemByName("Matchbox"))
+        if (hasMatchbox)
         {
             yield return new WaitForSeconds(0.8f);
 
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 20), -0.45f);
+            DoAirStrikeExplosion(airstrikePosition - strikeDirection * 20f, -0.45f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 10), -0.3f);
+
+            DoAirStrikeExplosion(airstrikePosition - strikeDirection * 10f, -0.3f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 0), 0);
+
+            DoAirStrikeExplosion(airstrikePosition, 0f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -10), -0.3f);
+
+            DoAirStrikeExplosion(airstrikePosition + strikeDirection * 10f, -0.3f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -20), -0.45f);
+
+            DoAirStrikeExplosion(airstrikePosition + strikeDirection * 20f, -0.45f);
         }
         else
         {
             yield return new WaitForSeconds(1f);
 
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 10), -0.3f);
+            DoAirStrikeExplosion(airstrikePosition - strikeDirection * 10f, -0.3f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, 0), 0);
+
+            DoAirStrikeExplosion(airstrikePosition, 0f);
             yield return new WaitForSeconds(0.2f);
-            DoAirStrikeExplosion(airstrikePosition - new Vector3(0, 0, -10), -0.3f);
+
+            DoAirStrikeExplosion(airstrikePosition + strikeDirection * 10f, -0.3f);
         }
     }
 
@@ -738,6 +771,9 @@ public sealed class PlayerRadio : MonoBehaviour
         if (state == RadioState.Returning ||
             state == RadioState.WeaponReady)
             return;
+
+        radioUI.SetActive(false);
+        promptText.text = "";
 
         StartCoroutine(ReturnToWeaponRoutine());
     }
