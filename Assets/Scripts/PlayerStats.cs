@@ -49,9 +49,9 @@ public sealed class PlayerStats : MonoBehaviour
 
     [Header("Radio")]
     public float radioChargeRate = 0.25f;
-    public float radioRepositionCooldown = 20f;
-    public float radioRespawnCooldown = 60f;
-    public float radioAirstrikeCooldown = 120f;
+    public float radioRepositionCooldown = 10f;
+    public float radioRespawnCooldown = 20f;
+    public float radioAirstrikeCooldown = 60f;
     public float radioAirstrikeDelay = 3f;
     public float radioAirstrikeScale = 2f;
     public float radioAirstrikeDamage = 100f;
