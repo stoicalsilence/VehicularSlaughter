@@ -96,14 +96,26 @@ public sealed class PlayerHealth : MonoBehaviour
         DetectEnemiesTouchingPlayer();
     }
 
+
     private void Update()
     {
-        if (playerStats.hpRegeneration > 0)
+        if (playerStats.hpRegeneration <= 0f ||
+            Time.timeScale <= 0f)
         {
-            currentHealth += playerStats.hpRegeneration / 600;
-            if (currentHealth > MaxHealth) currentHealth = MaxHealth;
+            return;
         }
+
+        float previousHealth = currentHealth;
+
+        currentHealth = Mathf.Min(
+            MaxHealth,
+            currentHealth + playerStats.hpRegeneration * Time.deltaTime / 10f
+        );
+
+        if (!Mathf.Approximately(previousHealth, currentHealth))
+            HealthChanged?.Invoke(currentHealth, MaxHealth);
     }
+
 
     private void DetectEnemiesTouchingPlayer()
     {

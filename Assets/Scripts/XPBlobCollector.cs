@@ -12,25 +12,44 @@ public class XPBlobCollector : MonoBehaviour
     [SerializeField] private float minCollectionDuration = 0.08f;
     [SerializeField] private float maxCollectionDuration = 0.25f;
 
+    [Header("XP Progression")]
+    [SerializeField] private PlayerLevelSystem levelSystem;
+
     [Header("Audio")]
     public AudioClip collectionStartSound;
     public AudioClip collectionFinishSound;
 
     [SerializeField] private float soundCooldown = 0.12f;
 
+    // Kept for compatibility with older systems.
+    // This now tracks XP awarded after applying the multiplier.
     public static float collectedXP;
 
-    // All active collectors (player and vehicle).
     private static readonly List<XPBlobCollector> ActiveCollectors =
         new List<XPBlobCollector>();
 
-    // Blobs currently travelling towards THIS collector.
     private readonly HashSet<XPBlob> collecting =
         new HashSet<XPBlob>();
 
-    // Shared audio throttling between player and vehicle.
     private static float nextStartSoundTime;
     private static float nextFinishSoundTime;
+
+    private void Awake()
+    {
+        // Automatically finds the progression system for the player collector.
+        // For the vehicle collector, assign the player's system in the Inspector.
+        if (levelSystem == null)
+            levelSystem = GetComponentInParent<PlayerLevelSystem>();
+
+        if (levelSystem == null)
+        {
+            Debug.LogError(
+                "XPBlobCollector: No PlayerLevelSystem assigned. " +
+                "Assign the player's PlayerLevelSystem in the Inspector.",
+                this
+            );
+        }
+    }
 
     private void OnEnable()
     {
@@ -51,8 +70,6 @@ public class XPBlobCollector : MonoBehaviour
         CancelInvoke(nameof(PollForXP));
         ActiveCollectors.Remove(this);
 
-        // Release blobs travelling towards this collector.
-        // They remain active and can be claimed by another collector.
         foreach (XPBlob blob in collecting)
         {
             if (blob == null)
@@ -65,7 +82,6 @@ public class XPBlobCollector : MonoBehaviour
         collecting.Clear();
     }
 
-    // Called by XPBlobPool immediately after spawning a blob.
     public static void NotifyBlobSpawned(XPBlob blob)
     {
         if (blob == null || blob.IsBeingCollected)
@@ -74,7 +90,6 @@ public class XPBlobCollector : MonoBehaviour
         XPBlobCollector closestCollector = null;
         float closestDistanceSquared = float.MaxValue;
 
-        // Find the closest collector that can reach this blob.
         for (int i = ActiveCollectors.Count - 1; i >= 0; i--)
         {
             XPBlobCollector collector = ActiveCollectors[i];
@@ -84,6 +99,10 @@ public class XPBlobCollector : MonoBehaviour
                 ActiveCollectors.RemoveAt(i);
                 continue;
             }
+
+            // Collectors without a progression target cannot collect XP.
+            if (collector.levelSystem == null)
+                continue;
 
             Vector3 offset =
                 blob.transform.position - collector.transform.position;
@@ -111,7 +130,6 @@ public class XPBlobCollector : MonoBehaviour
         closestCollector.CollectBlob(blob);
     }
 
-    // Fallback polling for blobs that enter collection range after spawning.
     private void PollForXP()
     {
         for (int i = XPBlob.ActiveBlobs.Count - 1; i >= 0; i--)
@@ -130,7 +148,7 @@ public class XPBlobCollector : MonoBehaviour
 
     private bool TryCollectBlob(XPBlob blob)
     {
-        if (blob == null || blob.IsBeingCollected)
+        if (levelSystem == null || blob == null || blob.IsBeingCollected)
             return false;
 
         Vector3 offset =
@@ -157,7 +175,6 @@ public class XPBlobCollector : MonoBehaviour
         if (startingNewBatch)
             PlayCollectionStartSound();
 
-        // Calculate collection duration based on distance.
         float distance = Vector3.Distance(
             blob.transform.position,
             transform.position
@@ -201,12 +218,21 @@ public class XPBlobCollector : MonoBehaviour
         if (!collecting.Remove(blob))
             return;
 
-        collectedXP += blob.XPValue;
+        if (levelSystem != null)
+        {
+            // Apply the PLAYER'S XP multiplier, regardless of
+            // whether this blob was collected by the person or car.
+            float xpAwarded =
+                blob.XPValue * levelSystem.XPGainMultiplier;
+
+            collectedXP += xpAwarded;
+
+            levelSystem.AddXP(xpAwarded);
+        }
 
         blob.ClearMoveTween();
         blob.ReturnToPool();
 
-        // Only play finish sound when the entire batch is done.
         if (collecting.Count == 0)
             PlayCollectionFinishSound();
     }

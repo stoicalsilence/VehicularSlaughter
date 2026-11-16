@@ -58764,11 +58764,12 @@ MonoBehaviour:
   wallStickSpeed: 1.5
   minimumClimbUpDot: 0.1
   xpBlobPool: {fileID: 0}
-  xpDropValue: 1
+  xpDropValue: 5
   maxHealth: 30
   contactDamage: 5
   hitFlashDuration: 0.08
   deathParticlePool: {fileID: 0}
+  playerInventory: {fileID: 0}
   deathSound: {fileID: 8300000, guid: c99e337f58429954f8e3bcdc2cee99d0, type: 3}
   deathSoundVolume: 1
   hitSound: {fileID: 8300000, guid: 46e18713a5ce34240b85e332a3b618e8, type: 3}

@@ -1622,6 +1622,60 @@ public sealed class PlayerInventory : MonoBehaviour
         cauldronBonusHealthGranted = totalEarnedHealth;
     }
 
+
+    // ==================================================
+    // LEVEL-UP REWARD STAT ACCESS
+    // ==================================================
+
+    public bool TryGetPlayerStatValue(
+        PlayerStatToModify stat,
+        out float value)
+    {
+        value = 0f;
+
+        if (playerStats == null || stat == PlayerStatToModify.None)
+            return false;
+
+        value = GetStatValue(stat, string.Empty);
+        return true;
+    }
+
+    public bool TryAddPlayerStat(
+        PlayerStatToModify stat,
+        float amount)
+    {
+        if (!TryGetPlayerStatValue(stat, out float currentValue))
+            return false;
+
+        SetStatValue(stat, currentValue + amount);
+        return true;
+    }
+
+    public bool TryGetCarStatValue(
+        CarStatToModify stat,
+        out float value)
+    {
+        value = 0f;
+
+        if (carStats == null || stat == CarStatToModify.None)
+            return false;
+
+        value = GetCarStatValue(stat);
+        return true;
+    }
+
+    public bool TryAddCarStat(
+        CarStatToModify stat,
+        float amount)
+    {
+        if (!TryGetCarStatValue(stat, out float currentValue))
+            return false;
+
+        SetCarStatValue(stat, currentValue + amount);
+        return true;
+    }
+
+
     // ==================================================
     // CLEANUP
     // ==================================================

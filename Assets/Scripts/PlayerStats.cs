@@ -45,7 +45,7 @@ public sealed class PlayerStats : MonoBehaviour
 
     [Header("Misc")]
     [SerializeField, Min(0f)] public float itemLuck = 0f;
-    [SerializeField, Min(0f)] public float xpGain = 0f;
+    [SerializeField, Min(1f)] public float xpGain = 1f;
 
     [Header("Radio")]
     public float radioChargeRate = 0.25f;
