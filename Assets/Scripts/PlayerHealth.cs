@@ -99,7 +99,10 @@ public sealed class PlayerHealth : MonoBehaviour
 
     private void Update()
     {
-        if (playerStats.hpRegeneration <= 0f ||
+        if (
+            playerStats.hpRegeneration <= 0f ||
+            currentHealth <= 0f ||
+            currentHealth >= MaxHealth ||
             Time.timeScale <= 0f)
         {
             return;
@@ -109,11 +112,13 @@ public sealed class PlayerHealth : MonoBehaviour
 
         currentHealth = Mathf.Min(
             MaxHealth,
-            currentHealth + playerStats.hpRegeneration * Time.deltaTime / 10f
+            currentHealth + playerStats.hpRegeneration * Time.deltaTime
         );
 
-        if (!Mathf.Approximately(previousHealth, currentHealth))
+        if (currentHealth != previousHealth)
+        {
             HealthChanged?.Invoke(currentHealth, MaxHealth);
+        }
     }
 
 

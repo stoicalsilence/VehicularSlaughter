@@ -749,7 +749,19 @@ public class CarController : MonoBehaviour
     void Update()
     {
         if (Time.timeScale <= 0f)
+        {
+            if (carEngineSound != null && carEngineSound.isPlaying)
+            {
+                carEngineSound.Stop();
+            }
+
+            if (tireScreechSound != null && tireScreechSound.isPlaying)
+            {
+                tireScreechSound.Stop();
+            }
+
             return;
+        }
 
         //CAR DATA
 
@@ -1002,9 +1014,13 @@ public class CarController : MonoBehaviour
     // Apart from that, the tireScreechSound will play whenever the car starts drifting or losing traction.
     public void CarSounds()
     {
-
         if (useSounds)
         {
+            if (carEngineSound != null && !carEngineSound.isPlaying)
+            {
+                carEngineSound.Play();
+            }
+
             try
             {
                 if ((isDrifting) || (isTractionLocked && Mathf.Abs(carSpeed) > 12f))

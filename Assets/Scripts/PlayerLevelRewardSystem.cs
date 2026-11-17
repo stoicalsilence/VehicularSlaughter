@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using DG.Tweening;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 [DisallowMultipleComponent]
 public sealed class PlayerLevelRewardSystem : MonoBehaviour
 {
+    public GameObject radioUI;
     private enum RewardTarget
     {
         Player,
@@ -111,6 +114,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         public CarStatToModify carStat;
         [Tooltip("Name shown on the reward card. Leave empty to use the enum name.")]
         public string displayName;
+        [Tooltip("Display-only conversion for PercentagePoints. Use 100 if the underlying stat is a fraction, e.g. 0.05 = 5%.")]
+        [Min(0.0001f)] public float percentagePointsDisplayScale = 1f;
         [Min(0f)]
         [Tooltip("Relative chance for this stat to be selected. This does not affect rarity.")]
         public float selectionWeight = 1f;
@@ -153,7 +158,10 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         public RewardTarget target;
         public ItemRarity rarity;
         public float delta;
-        public string description;
+        public float originalValue;
+        public float resultingValue;
+        public object vehicleIdentity;
+        public string amountText;
         public string statName;
     }
 
@@ -226,12 +234,22 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     [SerializeField] private Image[] rewardFrames = new Image[3];
     [SerializeField] private TextMeshProUGUI remainingChoicesText;
 
+    [Header("Reward Queue")]
+    [Tooltip("Keep unspent levels when no useful reward remains. Retry through RetryPendingChoices when stats change.")]
+    [SerializeField] private bool retainUnofferableChoices;
+
     // ==================================================
     // CARD COLOURS
     // ==================================================
 
     [Header("Card Colours")]
     [SerializeField] private Color commonColor = new Color(0.65f, 0.65f, 0.65f);
+    [SerializeField] private Color cardBackground = new Color(0.035f, 0.075f, 0.13f, 0.96f);
+    [SerializeField, Range(0f, 1f)] private float rarityBackgroundTint = 0.22f;
+    [SerializeField] private Color titleColor = Color.white;
+    [SerializeField] private Color playerAccent = new Color(0.36f, 0.8f, 1f);
+    [SerializeField] private Color vehicleAccent = new Color(0.36f, 0.8f, 1f);
+    [SerializeField] private Color improvementColor = new Color(0.45f, 1f, 0.5f);
     [SerializeField] private Color rareColor = new Color(0.2f, 0.65f, 1f);
     [SerializeField] private Color epicColor = new Color(0.75f, 0.3f, 1f);
     [SerializeField] private Color legendaryColor = new Color(1f, 0.7f, 0.15f);
@@ -256,7 +274,12 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     // RUNTIME STATE
     // ==================================================
 
-    private readonly RewardOption[] currentOptions = new RewardOption[3];
+    private const int ChoiceCount = 3;
+    private const float StatEpsilon = 0.0001f;
+    private readonly RewardOption[] currentOptions = new RewardOption[ChoiceCount];
+    private readonly List<RewardDefinition> candidates = new List<RewardDefinition>(64);
+    private bool isApplying;
+    private bool inputReady;
     private int pendingChoices;
     private bool isShowing;
     private bool isClosing;
@@ -391,7 +414,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         {
             // Survivability
             PlayerReward(PlayerStatToModify.MaxHealth, "Maximum Health", maximumValue: 500f),
-            PlayerReward(PlayerStatToModify.DamageCooldown, "Damage Invincibility Time", maximumValue: 3f),
+            PlayerReward(PlayerStatToModify.DamageCooldown, "Damage Invulnerability Time", maximumValue: 3f),
             PlayerReward(PlayerStatToModify.ThornsDamage, "Thorns Damage", zeroFallback: 1f, maximumValue: 100f),
             PlayerReward(PlayerStatToModify.HPRegeneration, "Health Regeneration", zeroFallback: 1f, maximumValue: 10f),
 
@@ -406,7 +429,6 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             PlayerReward(PlayerStatToModify.Friction, "Ground Friction", lowerIsBetter: true, minimumValue: 1.5f),
             PlayerReward(PlayerStatToModify.AirMoveSpeed, "Air Movement Speed", maximumValue: 12f),
             PlayerReward(PlayerStatToModify.AirAcceleration, "Air Acceleration", maximumValue: 8f),
-            PlayerReward(PlayerStatToModify.AirDeceleration, "Air Counter-Steering", maximumValue: 8f),
             PlayerReward(PlayerStatToModify.AirControl, "Air Control", maximumValue: 1f),
             PlayerReward(PlayerStatToModify.JumpForce, "Jump Force", maximumValue: 12f),
             PlayerReward(PlayerStatToModify.StrafeMaxSpeed, "Air Strafe Speed", maximumValue: 5f),
@@ -454,7 +476,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             VehicleReward(CarStatToModify.CarExplosionDamageRange, "Vehicle Explosion Range", maximumValue: 30f),
             VehicleReward(CarStatToModify.MaximumEnemyDamage, "Maximum Run-Over Damage", maximumValue: 250f),
             VehicleReward(CarStatToModify.MaximumEnemyKnockback, "Run-Over Knockback", maximumValue: 50f),
-            VehicleReward(CarStatToModify.EnemyContactDamageCooldown, "Vehicle Contact Protection Interval", maximumValue: 3f),
+            VehicleReward(CarStatToModify.EnemyContactDamageCooldown, "Contact Protection Interval", maximumValue: 3f),
 
             // Mounted turret
             VehicleReward(CarStatToModify.TurretDamagePerShot, "Turret Damage", maximumValue: 100f),
@@ -604,6 +626,14 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         if (integerRanges == null)
             integerRanges = new IntegerRarityRanges();
 
+        if (choicePanel != null && (choicePanel.transform == transform || transform.IsChildOf(choicePanel.transform)))
+        {
+            Debug.LogError("PlayerLevelRewardSystem must live outside the panel it hides.", this);
+            choicePanel = null;
+            enabled = false;
+            return;
+        }
+
         if (choicePanel != null)
         {
             panelOpenScale = choicePanel.transform.localScale;
@@ -621,7 +651,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         if (!HasValidUI())
         {
             Debug.LogError(
-                "PlayerLevelRewardSystem: Assign the reward panel and all three reward buttons.",
+                "PlayerLevelRewardSystem: Assign a reward panel and three distinct child reward buttons.",
                 this);
         }
         else
@@ -638,6 +668,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         if (inventory == null)
             Debug.LogError("PlayerLevelRewardSystem: PlayerInventory is missing.", this);
 
+        NormalizeRewardList(playerRewards);
+        NormalizeRewardList(vehicleRewards);
         initialized = true;
     }
 
@@ -655,8 +687,15 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
                rewardButtons[0] != null &&
                rewardButtons[1] != null &&
                rewardButtons[2] != null &&
+               rewardButtons[0] != rewardButtons[1] &&
+               rewardButtons[0] != rewardButtons[2] &&
+               rewardButtons[1] != rewardButtons[2] &&
+               IsPanelChild(rewardButtons[0]) && IsPanelChild(rewardButtons[1]) && IsPanelChild(rewardButtons[2]) &&
                canvasGroup != null;
     }
+
+    private bool IsPanelChild(Button button) => button.transform != choicePanel.transform &&
+        button.transform.IsChildOf(choicePanel.transform);
 
     private void OnValidate()
     {
@@ -700,6 +739,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
             reward.selectionWeight = Mathf.Max(0f, reward.selectionWeight);
             reward.flatScale = Mathf.Max(0f, reward.flatScale);
+            if (!IsFinite(reward.percentagePointsDisplayScale) || reward.percentagePointsDisplayScale <= 0f)
+                reward.percentagePointsDisplayScale = 1f;
             reward.zeroValueFallback = Mathf.Max(0f, reward.zeroValueFallback);
             reward.minimumValue = Mathf.Max(0f, reward.minimumValue);
             reward.maximumValue = Mathf.Max(0f, reward.maximumValue);
@@ -765,12 +806,18 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     // GENERATE OFFERS
     // ==================================================
 
+    public void RetryPendingChoices()
+    {
+        if (initialized && isActiveAndEnabled)
+            ShowNextOffer();
+    }
+
     private void ShowNextOffer()
     {
-        if (pendingChoices <= 0 || isShowing || isClosing)
+        if (!initialized || !isActiveAndEnabled || pendingChoices <= 0 || isShowing || isClosing || isApplying)
             return;
 
-        if (!HasValidUI() || inventory == null)
+        if (!HasValidUI() || !listenersRegistered || inventory == null)
         {
             Debug.LogError("PlayerLevelRewardSystem: Reward UI or inventory is missing.", this);
             RestoreGameState();
@@ -779,7 +826,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
         Array.Clear(currentOptions, 0, currentOptions.Length);
 
-        List<RewardDefinition> candidates = new List<RewardDefinition>();
+        candidates.Clear();
         AddEligibleDefinitions(playerRewards, RewardTarget.Player, candidates);
 
         // Car rewards are available only when the inventory exposes an assigned current car.
@@ -805,41 +852,53 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
         if (generatedCount == 0)
         {
-            Debug.LogWarning(
-                "PlayerLevelRewardSystem: No enabled, readable rewards can currently change their stats. " +
-                "The pending level-up choices were cleared. Review reward enablement and stat limits.",
-                this);
-
-            pendingChoices = 0;
+            Debug.LogWarning("PlayerLevelRewardSystem: No useful rewards remain. " +
+                (retainUnofferableChoices ? "Pending levels retained." : "Pending levels cleared."), this);
+            if (!retainUnofferableChoices)
+                pendingChoices = 0;
             UpdateRemainingChoicesText();
             RestoreGameState();
             return;
         }
 
-        UpdateCardUI();
-
         isShowing = true;
         isClosing = false;
+        inputReady = false;
         SaveAndPauseGame();
-
-        menuSequence?.Kill();
-
+        KillMenuTween();
+        radioUI.SetActive(false);
         choicePanel.SetActive(true);
+        UpdateCardUI();
         choicePanel.transform.localScale = panelOpenScale * startScale;
         canvasGroup.alpha = 0f;
-        canvasGroup.interactable = true;
+        canvasGroup.interactable = false;
         canvasGroup.blocksRaycasts = true;
-        SetRewardButtonsInteractable(true);
+        SetRewardButtonsInteractable(false);
 
+        if (openDuration <= 0f)
+        {
+            FinishOpeningOffer();
+            return;
+        }
         menuSequence = DOTween.Sequence().SetUpdate(true);
-        menuSequence.Join(
-            choicePanel.transform
-                .DOScale(panelOpenScale, openDuration)
-                .SetEase(Ease.OutBack));
-        menuSequence.Join(
-            canvasGroup
-                .DOFade(1f, openDuration)
-                .SetEase(Ease.OutQuad));
+        menuSequence.Join(choicePanel.transform.DOScale(panelOpenScale, openDuration).SetEase(Ease.OutCubic));
+        menuSequence.Join(canvasGroup.DOFade(1f, openDuration).SetEase(Ease.OutQuad));
+        menuSequence.OnComplete(FinishOpeningOffer);
+    }
+
+    private void FinishOpeningOffer()
+    {
+        menuSequence = null;
+        if (!isShowing || !isActiveAndEnabled) return;
+        choicePanel.transform.localScale = panelOpenScale;
+        canvasGroup.alpha = 1f;
+        inputReady = true;
+        canvasGroup.interactable = true;
+        SetRewardButtonsInteractable(true);
+        if (EventSystem.current != null)
+        {
+            EventSystem.current.SetSelectedGameObject(rewardButtons[0].gameObject);
+        }
     }
 
     private void AddEligibleDefinitions(
@@ -853,10 +912,13 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         for (int i = 0; i < source.Count; i++)
         {
             RewardDefinition definition = source[i];
-            if (definition == null || !definition.enabled || definition.selectionWeight <= 0f)
+            if (definition == null || !definition.enabled || !IsFinite(definition.selectionWeight) || definition.selectionWeight <= 0f)
                 continue;
 
-            if (!TryGetStatValue(definition, target, out float currentValue))
+            if (!TryGetStatValue(definition, target, out float currentValue) || !IsFinite(currentValue))
+                continue;
+            if (definition.magnitudeMode == MagnitudeMode.PercentOfCurrentValue &&
+                Mathf.Approximately(currentValue, 0f) && definition.zeroValueFallback <= 0f)
                 continue;
 
             if (definition.useMinimumValue && currentValue <= definition.minimumValue + 0.0001f && definition.lowerIsBetter)
@@ -949,7 +1011,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private RewardOption GenerateReward(RewardDefinition definition, RewardTarget target)
     {
-        if (!TryGetStatValue(definition, target, out float currentValue))
+        if (!TryGetStatValue(definition, target, out float currentValue) || !IsFinite(currentValue))
             return null;
 
         ItemRarity rarity = RollRarity();
@@ -988,7 +1050,9 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             case MagnitudeMode.IntegerStep:
                 {
                     Vector2Int range = GetIntegerRange(definition, rarity);
-                    magnitude = UnityEngine.Random.Range(range.x, range.y + 1);
+                    magnitude = range.y == int.MaxValue
+                        ? (float)System.Math.Min(range.y, System.Math.Floor(UnityEngine.Random.value * ((double)range.y - range.x + 1) + range.x))
+                        : UnityEngine.Random.Range(range.x, range.y + 1);
                     break;
                 }
 
@@ -996,33 +1060,29 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
                 return null;
         }
 
-        if (definition.roundToInteger || definition.magnitudeMode == MagnitudeMode.IntegerStep)
+        if (!IsFinite(magnitude) || magnitude <= 0f)
+            return null;
+        bool integerReward = definition.roundToInteger || definition.magnitudeMode == MagnitudeMode.IntegerStep;
+        if (integerReward)
             magnitude = Mathf.Max(1f, Mathf.Round(magnitude));
 
         float requestedDelta = definition.lowerIsBetter ? -magnitude : magnitude;
         float resultingValue = currentValue + requestedDelta;
 
-        // All stats in these pools are non-negative. Apply zero as the implicit
-        // floor unless a stricter per-reward minimum has been configured.
-        float minimumAllowed = definition.useMinimumValue
-            ? definition.minimumValue
-            : 0f;
-        resultingValue = Mathf.Max(resultingValue, minimumAllowed);
-
-        // Never let an increase exceed its configured cap.
-        if (definition.useMaximumValue)
-            resultingValue = Mathf.Min(resultingValue, definition.maximumValue);
-
-        if (definition.roundToInteger || definition.magnitudeMode == MagnitudeMode.IntegerStep)
+        float minimumAllowed = definition.useMinimumValue ? definition.minimumValue : 0f;
+        float maximumAllowed = definition.useMaximumValue ? definition.maximumValue : float.PositiveInfinity;
+        if (integerReward)
+        {
+            minimumAllowed = Mathf.Ceil(minimumAllowed);
+            maximumAllowed = Mathf.Floor(maximumAllowed);
             resultingValue = Mathf.Round(resultingValue);
-
-        // Re-apply limits after rounding so an integer reward cannot round past a configured cap.
-        resultingValue = Mathf.Max(resultingValue, minimumAllowed);
-        if (definition.useMaximumValue)
-            resultingValue = Mathf.Min(resultingValue, definition.maximumValue);
-
+        }
+        if (minimumAllowed > maximumAllowed || !IsFinite(resultingValue))
+            return null;
+        resultingValue = Mathf.Clamp(resultingValue, minimumAllowed, maximumAllowed);
         float actualDelta = resultingValue - currentValue;
-        if (Mathf.Abs(actualDelta) < 0.0001f)
+        // A cap or unusual input value must never turn an upgrade into a downgrade.
+        if (!IsFinite(actualDelta) || (definition.lowerIsBetter ? actualDelta >= -StatEpsilon : actualDelta <= StatEpsilon))
             return null;
 
         string statName = string.IsNullOrWhiteSpace(definition.displayName)
@@ -1031,26 +1091,16 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
                 : definition.carStat.ToString())
             : definition.displayName.Trim();
 
-        string amountText = BuildAmountText(
-            definition,
-            currentValue,
-            magnitude,
-            actualDelta,
-            usedZeroFallback);
-
-        // Show the rolled improvement together with the exact before/after values.
-        // The stat name is already displayed in the card title, so keep this text compact.
-        string amountSign = actualDelta < 0f ? "-" : "+";
-        string valueTransition = $"{FormatStatValue(currentValue, definition)} -> {FormatStatValue(resultingValue, definition)}";
-        string description = $"{amountSign}{amountText}\n{valueTransition}";
-
         return new RewardOption
         {
             definition = definition,
             target = target,
             rarity = rarity,
             delta = actualDelta,
-            description = description,
+            originalValue = currentValue,
+            resultingValue = resultingValue,
+            vehicleIdentity = target == RewardTarget.Vehicle ? (object)inventory.CurrentCarStats : null,
+            amountText = BuildAmountText(definition, currentValue, actualDelta, usedZeroFallback),
             statName = statName
         };
     }
@@ -1095,37 +1145,32 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     private ItemRarity RollRarity()
     {
         float luck = playerStats != null ? Mathf.Max(0f, playerStats.itemLuck) : 0f;
-
-        float[] weights =
-        {
-            commonWeight,
-            rareWeight,
-            epicWeight,
-            legendaryWeight
-        };
-
-        float totalWeight = 0f;
-        for (int i = 0; i < weights.Length; i++)
-        {
-            float luckMultiplier = 1f + luck * luckWeightPerPoint * i;
-            luckMultiplier = Mathf.Min(luckMultiplier, maximumLuckWeightMultiplier);
-            weights[i] *= luckMultiplier;
-            totalWeight += weights[i];
-        }
-
-        if (totalWeight <= 0f)
-            return ItemRarity.Common;
-
-        float roll = UnityEngine.Random.Range(0f, totalWeight);
-        for (int i = 0; i < weights.Length; i++)
-        {
-            roll -= weights[i];
-            if (roll <= 0f)
-                return (ItemRarity)i;
-        }
-
-        return ItemRarity.Legendary;
+        if (!IsFinite(luck)) luck = 0f;
+        float common = Mathf.Max(0f, commonWeight);
+        float rare = GetLuckAdjustedWeight(rareWeight, luck, 1);
+        float epic = GetLuckAdjustedWeight(epicWeight, luck, 2);
+        float legendary = GetLuckAdjustedWeight(legendaryWeight, luck, 3);
+        float total = common + rare + epic + legendary;
+        if (total <= 0f || !IsFinite(total)) return ItemRarity.Common;
+        float roll = UnityEngine.Random.Range(0f, total);
+        if (common > 0f && roll < common) return ItemRarity.Common;
+        roll -= common;
+        if (rare > 0f && roll < rare) return ItemRarity.Rare;
+        roll -= rare;
+        if (epic > 0f && roll < epic) return ItemRarity.Epic;
+        // Random.Range(float,float) includes the upper endpoint.
+        if (legendary > 0f) return ItemRarity.Legendary;
+        if (epic > 0f) return ItemRarity.Epic;
+        if (rare > 0f) return ItemRarity.Rare;
+        return ItemRarity.Common;
     }
+
+    private float GetLuckAdjustedWeight(float weight, float luck, int tier)
+    {
+        return Mathf.Max(0f, weight) * Mathf.Min(1f + luck * luckWeightPerPoint * tier, maximumLuckWeightMultiplier);
+    }
+
+    private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
     // ==================================================
     // CARD TEXT AND COLOURS
@@ -1134,7 +1179,6 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     private string BuildAmountText(
         RewardDefinition definition,
         float currentValue,
-        float requestedMagnitude,
         float actualDelta,
         bool usedZeroFallback)
     {
@@ -1162,29 +1206,33 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         {
             case DisplayMode.PercentageOfCurrentValue:
                 {
-                    float actualPercentage = Mathf.Abs(currentValue) > 0.0001f
-                        ? actualAmount / Mathf.Abs(currentValue)
-                        : requestedMagnitude;
-                    return actualPercentage.ToString("P0");
+                    if (usedZeroFallback || Mathf.Abs(currentValue) <= StatEpsilon)
+                        return FormatAmount(actualAmount);
+                    return (actualAmount / Mathf.Abs(currentValue)).ToString("0.##%", CultureInfo.InvariantCulture);
                 }
 
             case DisplayMode.PercentagePoints:
-                return actualAmount.ToString("0.#") + "%";
+                return FormatAmount(actualAmount * definition.percentagePointsDisplayScale) + " pp";
 
             case DisplayMode.Integer:
-                return actualAmount.ToString("0");
+                return FormatAmount(actualAmount);
 
             default:
-                return actualAmount.ToString("0.##");
+                return FormatAmount(actualAmount);
         }
+    }
+
+    private static string FormatAmount(float value)
+    {
+        // Avoid showing tiny but nonzero improvements as zero.
+        return value.ToString(Mathf.Abs(value) < 0.01f && value != 0f ? "0.####" : "0.##", CultureInfo.InvariantCulture);
     }
 
     private static string FormatStatValue(float value, RewardDefinition definition)
     {
-        bool useIntegerFormat = definition != null &&
-            (definition.roundToInteger || definition.magnitudeMode == MagnitudeMode.IntegerStep);
-
-        return value.ToString(useIntegerFormat ? "0" : "0.##");
+        if (definition.displayMode == DisplayMode.PercentagePoints)
+            return FormatAmount(value * definition.percentagePointsDisplayScale) + "%";
+        return FormatAmount(value);
     }
 
     private Color GetRarityColor(ItemRarity rarity)
@@ -1199,54 +1247,75 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         }
     }
 
+    private static T At<T>(T[] items, int index) where T : UnityEngine.Object => items != null && index < items.Length ? items[index] : null;
+
     private void UpdateCardUI()
     {
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < ChoiceCount; i++)
         {
             RewardOption option = currentOptions[i];
             bool hasOption = option != null;
-
-            if (rewardNameTexts != null && i < rewardNameTexts.Length && rewardNameTexts[i] != null)
-                rewardNameTexts[i].text = hasOption
-                    ? (option.target == RewardTarget.Player ? "PLAYER - " : "VEHICLE - ") + option.statName
-                    : string.Empty;
-
-            if (rarityTexts != null && i < rarityTexts.Length && rarityTexts[i] != null)
+            TextMeshProUGUI name = At(rewardNameTexts, i);
+            TextMeshProUGUI rarity = At(rarityTexts, i);
+            TextMeshProUGUI description = At(descriptionTexts, i);
+            Image frame = At(rewardFrames, i);
+            rewardButtons[i].gameObject.SetActive(hasOption);
+            if (!hasOption)
             {
-                rarityTexts[i].text = hasOption
-                    ? option.rarity.ToString().ToUpperInvariant()
-                    : string.Empty;
-                if (hasOption)
-                    rarityTexts[i].color = GetRarityColor(option.rarity);
+                if (name != null) name.text = string.Empty;
+                if (rarity != null) rarity.text = string.Empty;
+                if (description != null) description.text = string.Empty;
+                continue;
             }
+            Color accent = GetRarityColor(option.rarity);
+            Color targetColor = option.target == RewardTarget.Player ? playerAccent : vehicleAccent;
+            string target = option.target == RewardTarget.Player ? "PLAYER" : "VEHICLE";
+            string amount = (option.delta < 0f ? "-" : "+") + option.amountText;
+            string before = FormatStatValue(option.originalValue, option.definition);
+            string after = FormatStatValue(option.resultingValue, option.definition);
+            string green = ColorUtility.ToHtmlStringRGB(improvementColor);
+            string comparison = $"{before}  ->  <color=#{green}>{after}</color>";
 
-            if (descriptionTexts != null && i < descriptionTexts.Length && descriptionTexts[i] != null)
-                descriptionTexts[i].text = hasOption ? option.description : string.Empty;
-
-            if (rewardFrames != null && i < rewardFrames.Length && rewardFrames[i] != null)
-                rewardFrames[i].color = hasOption ? GetRarityColor(option.rarity) : Color.white;
-
-            rewardButtons[i].interactable = hasOption;
+            if (name != null)
+            {
+                name.richText = true;
+                name.color = titleColor;
+                name.text = $"<color=#{ColorUtility.ToHtmlStringRGB(targetColor)}>{target}</color>  |  {option.statName}";
+            }
+            if (rarity != null)
+            {
+                rarity.text = option.rarity.ToString().ToUpperInvariant();
+                rarity.color = accent;
+            }
+            Color background = Color.Lerp(cardBackground, accent, rarityBackgroundTint);
+            background.a = cardBackground.a;
+            if (frame != null) frame.color = background;
+            if (description != null)
+            {
+                description.richText = true;
+                description.color = titleColor;
+                string richAmount = $"<color=#{green}><b>{amount}</b></color>";
+                description.text = richAmount + "\n" + comparison;
+            }
         }
-
         UpdateRemainingChoicesText();
     }
 
     private void UpdateRemainingChoicesText()
     {
         if (remainingChoicesText != null)
-            remainingChoicesText.text = pendingChoices + " LEVELS REMAINING";
+        {
+            remainingChoicesText.richText = true;
+            remainingChoicesText.text = $"<b>{pendingChoices}</b> {(pendingChoices == 1 ? "LEVEL" : "LEVELS")} REMAINING";
+        }
     }
 
     private void SetRewardButtonsInteractable(bool value)
     {
-        if (rewardButtons == null)
-            return;
-
-        for (int i = 0; i < Mathf.Min(3, rewardButtons.Length); i++)
+        if (rewardButtons != null)
         {
-            if (rewardButtons[i] != null)
-                rewardButtons[i].interactable = value && currentOptions[i] != null;
+            for (int i = 0; i < Mathf.Min(ChoiceCount, rewardButtons.Length); i++)
+                if (rewardButtons[i] != null) rewardButtons[i].interactable = value && currentOptions[i] != null;
         }
     }
 
@@ -1274,33 +1343,73 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     private void SelectReward1() => SelectReward(1);
     private void SelectReward2() => SelectReward(2);
 
+    private bool CanChoose => isShowing && inputReady && !isClosing && !isApplying;
+
     private void SelectReward(int index)
     {
-        if (!isShowing || isClosing || index < 0 || index >= currentOptions.Length)
-            return;
-
-        RewardOption selected = currentOptions[index];
-        if (selected == null)
-            return;
-
-        if (!TryApplyReward(selected))
+        if (!CanChoose || index < 0 || index >= ChoiceCount) return;
+        RewardOption option = currentOptions[index];
+        if (option == null) return;
+        if (!IsOfferCurrent(option))
         {
-            Debug.LogWarning(
-                "PlayerLevelRewardSystem: Could not apply the selected reward. " +
-                "Check PlayerInventory's stat mapping and the active PlayerStats/CarStats references.",
-                this);
+            // Do not apply a delta calculated for a different car or stale stat.
+            // Rebuild the offer without consuming the level.
+            Debug.LogWarning("PlayerLevelRewardSystem: Stat or vehicle changed while choosing. Refreshing offer.", this);
+            BeginClose();
             return;
         }
-
-        isShowing = false;
-        isClosing = true;
+        isApplying = true;
         SetRewardButtonsInteractable(false);
+        bool applied;
+        try
+        {
+            applied = TryApplyReward(option);
+        }
+        catch
+        {
+            isApplying = false;
+            if (isShowing && inputReady) SetRewardButtonsInteractable(true);
+            throw;
+        }
+        finally
+        {
+            isApplying = false;
+        }
+        if (!applied)
+        {
+            if (isShowing && inputReady) SetRewardButtonsInteractable(true);
+            Debug.LogWarning("PlayerLevelRewardSystem: Could not apply selected reward. Check inventory stat mapping.", this);
+            return;
+        }
+        // Applying a stat may invoke other game callbacks (including disabling this component).
+        ConsumeChoice();
+    }
+
+    private bool IsOfferCurrent(RewardOption option)
+    {
+        if (inventory == null) return false;
+        if (option.target == RewardTarget.Vehicle && (inventory.CurrentCarStats == null ||
+            !ReferenceEquals(option.vehicleIdentity, inventory.CurrentCarStats))) return false;
+        return TryGetStatValue(option.definition, option.target, out float value) && IsFinite(value) &&
+            Mathf.Abs(value - option.originalValue) <= StatEpsilon;
+    }
+
+    private void ConsumeChoice()
+    {
         pendingChoices = Mathf.Max(0, pendingChoices - 1);
         UpdateRemainingChoicesText();
+        if (isActiveAndEnabled && isShowing) BeginClose();
+        else if (isActiveAndEnabled && !isClosing && pendingChoices > 0) ShowNextOffer();
+        if (rewardSelectedSound != null) AudioManager.Play2D(rewardSelectedSound);
+    }
 
-        if (rewardSelectedSound != null)
-            AudioManager.Play2D(rewardSelectedSound);
-
+    private void BeginClose()
+    {
+        isShowing = false;
+        isClosing = true;
+        inputReady = false;
+        SetRewardButtonsInteractable(false);
+        canvasGroup.interactable = false;
         CloseCurrentOffer();
     }
 
@@ -1310,7 +1419,12 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void CloseCurrentOffer()
     {
-        menuSequence?.Kill();
+        KillMenuTween();
+        if (closeDuration <= 0f)
+        {
+            FinishClosingOffer();
+            return;
+        }
         menuSequence = DOTween.Sequence().SetUpdate(true);
 
         menuSequence.Join(
@@ -1328,9 +1442,12 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void FinishClosingOffer()
     {
+        menuSequence = null;
+        ClearMenuFocus();
         if (choicePanel != null)
         {
             choicePanel.SetActive(false);
+            radioUI.SetActive(true);
             choicePanel.transform.localScale = panelOpenScale;
         }
 
@@ -1389,10 +1506,26 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     // CLEANUP
     // ==================================================
 
+    private void KillMenuTween()
+    {
+        if (menuSequence == null) return;
+        menuSequence.Kill(false);
+        menuSequence = null;
+    }
+
+    private void ClearMenuFocus()
+    {
+        if (choicePanel == null || EventSystem.current == null) return;
+        GameObject focused = EventSystem.current.currentSelectedGameObject;
+        if (focused != null && focused.transform.IsChildOf(choicePanel.transform))
+            EventSystem.current.SetSelectedGameObject(null);
+    }
+
     private void OnDisable()
     {
-        menuSequence?.Kill();
-        menuSequence = null;
+        KillMenuTween();
+        ClearMenuFocus();
+        inputReady = false;
 
         isShowing = false;
         isClosing = false;
@@ -1415,8 +1548,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void OnDestroy()
     {
-        menuSequence?.Kill();
-
+        KillMenuTween();
         if (listenersRegistered && rewardButtons != null && rewardButtons.Length >= 3)
         {
             if (rewardButtons[0] != null)

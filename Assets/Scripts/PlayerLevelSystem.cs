@@ -12,9 +12,17 @@ public sealed class PlayerLevelSystem : MonoBehaviour
     [SerializeField, Min(0f)]
     private float additionalXPPerLevelEarned = 25f;
 
-    [Header("Player Stats")]
-    [SerializeField]
-    private PlayerStats playerStats;
+    [Header("Player References")]
+    [SerializeField] private PlayerStats playerStats;
+    [SerializeField] private PlayerInventory playerInventory;
+
+    [Header("Item Effects")]
+    [Tooltip("Additional XP multiplier per banked level and owned CEO Book.")]
+    [SerializeField, Min(0f)]
+    private float ceoBookXPBonusPerBankedLevel = 0.05f;
+
+    private const string CEOBookItemName =
+        "CEO Grindset Self-Help Book";
 
     private float currentXP;
     private int bankedLevels;
@@ -37,9 +45,18 @@ public sealed class PlayerLevelSystem : MonoBehaviour
     // Lifetime levels earned. Spending levels never decreases this.
     public int TotalLevelsEarned => totalLevelsEarned;
 
-    // Both the person and car use the same player's multiplier.
+    // Permanent XP multiplier from player stats.
+    public float BaseXPGainMultiplier =>
+        playerStats != null
+            ? Mathf.Max(1f, playerStats.xpGain)
+            : 1f;
+
+    // Dynamic XP bonus from the CEO Book.
+    public float CEOBookXPBonus => GetCEOBookXPBonus();
+
+    // Effective XP multiplier used by both player and vehicle.
     public float XPGainMultiplier =>
-        playerStats != null ? playerStats.xpGain : 1f;
+        BaseXPGainMultiplier + CEOBookXPBonus;
 
     public event Action XPChanged;
     public event Action<int> BankedLevelsChanged;
@@ -48,16 +65,25 @@ public sealed class PlayerLevelSystem : MonoBehaviour
     private void Awake()
     {
         if (playerStats == null)
-            playerStats = GetComponent<PlayerStats>();
-
-        if (playerStats == null)
             playerStats = GetComponentInParent<PlayerStats>();
+
+        if (playerInventory == null)
+            playerInventory = GetComponentInParent<PlayerInventory>();
 
         if (playerStats == null)
         {
             Debug.LogWarning(
                 "PlayerLevelSystem: No PlayerStats assigned. " +
-                "XP gain multiplier will default to 1.",
+                "Base XP gain multiplier will default to 1.",
+                this
+            );
+        }
+
+        if (playerInventory == null)
+        {
+            Debug.LogWarning(
+                "PlayerLevelSystem: No PlayerInventory assigned. " +
+                "Conditional XP item effects will be disabled.",
                 this
             );
         }
@@ -66,8 +92,12 @@ public sealed class PlayerLevelSystem : MonoBehaviour
     private void OnValidate()
     {
         baseXPToNextLevel = Mathf.Max(1f, baseXPToNextLevel);
+
         additionalXPPerLevelEarned =
             Mathf.Max(0f, additionalXPPerLevelEarned);
+
+        ceoBookXPBonusPerBankedLevel =
+            Mathf.Max(0f, ceoBookXPBonusPerBankedLevel);
     }
 
     /// <summary>
@@ -99,7 +129,9 @@ public sealed class PlayerLevelSystem : MonoBehaviour
 
             for (int i = 0; i < levelsGained; i++)
             {
-                LevelEarned?.Invoke(totalLevelsEarned - levelsGained + i + 1);
+                LevelEarned?.Invoke(
+                    totalLevelsEarned - levelsGained + i + 1
+                );
             }
         }
 
@@ -129,5 +161,31 @@ public sealed class PlayerLevelSystem : MonoBehaviour
         BankedLevelsChanged?.Invoke(bankedLevels);
 
         return true;
+    }
+
+    // ==================================================
+    // ITEM EFFECTS
+    // ==================================================
+
+    /// <summary>
+    /// CEO Grindset Self-Help Book:
+    /// Grants additional XP Gain for every banked level
+    /// and every owned stack of the item.
+    /// </summary>
+    private float GetCEOBookXPBonus()
+    {
+        if (playerInventory == null || bankedLevels <= 0)
+            return 0f;
+
+        int stacks = playerInventory.GetStacksByName(
+            CEOBookItemName
+        );
+
+        if (stacks <= 0)
+            return 0f;
+
+        return bankedLevels *
+               stacks *
+               Mathf.Max(0f, ceoBookXPBonusPerBankedLevel);
     }
 }
