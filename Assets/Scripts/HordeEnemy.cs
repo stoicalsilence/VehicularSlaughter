@@ -1,4 +1,3 @@
-
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -77,7 +76,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     private bool isDead;
 
     public float CurrentHealth => currentHealth;
-    public float MaxHealth => maxHealth;
+    public float MaxHealth => Mathf.Max(1f, maxHealth * HealthMultiplier);
     public bool IsDead => isDead;
 
 
@@ -151,6 +150,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     [Tooltip("Scales how much this enemy damages the car when hit. Use higher values for armored/heavy enemies.")]
     private float vehicleImpactCarDamageMultiplier = 1f;
 
+    [Tooltip("Vehicle-specific contact factor. Multiply the scaled contactDamage by this; do not apply run difficulty again.")]
     [SerializeField, Min(0f)]
     public float vehicleContactDamageMultiplier = 1f;
 
@@ -163,7 +163,20 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     [Header("Baked Animation")]
     [SerializeField] private HordeBakedAnimator bakedAnimator;
 
-    public float VehicleImpactCarDamageMultiplier => vehicleImpactCarDamageMultiplier;
+    // Per-spawn difficulty snapshot. Only outgoing damage is scaled.
+    public float HealthMultiplier { get; private set; } = 1f;
+    public float SpeedMultiplier { get; private set; } = 1f;
+    public float DamageMultiplier { get; private set; } = 1f;
+    public float MoveSpeed => moveSpeed * SpeedMultiplier;
+    public float ClimbSpeed => climbSpeed * SpeedMultiplier;
+
+    // Contact damage stays a public field for existing player/car callers.
+    // Capture it once, then restore from the base on every pool reuse.
+    private float baseContactDamage;
+    public float BaseContactDamage => baseContactDamage;
+
+    public float VehicleImpactCarDamageMultiplier =>
+        vehicleImpactCarDamageMultiplier * DamageMultiplier;
 
     private void Awake()
     {
@@ -172,7 +185,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         defaultGravity = rb.useGravity;
 
-        currentHealth = maxHealth;
+        baseContactDamage = contactDamage;
+        currentHealth = MaxHealth;
         CacheFlashRenderers();
 
         if (bakedAnimator == null)
@@ -317,7 +331,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             stopDistance * stopDistance)
         {
             desiredVelocity =
-                directionToPlayer.normalized * moveSpeed;
+                directionToPlayer.normalized * MoveSpeed;
         }
 
         // Prevent all enemies from occupying one position.
@@ -325,7 +339,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         desiredVelocity = Vector3.ClampMagnitude(
             desiredVelocity,
-            moveSpeed + separationStrength
+            MoveSpeed + separationStrength
         );
 
         Vector3 currentVelocity = Velocity;
@@ -510,7 +524,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         // Move upwards/along the wall and stay attached.
         Vector3 desiredVelocity =
-            climbDirection * climbSpeed -
+            climbDirection * ClimbSpeed -
             wallNormal * wallStickSpeed;
 
         Velocity = Vector3.MoveTowards(
@@ -598,9 +612,19 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     public void ResetForSpawn()
     {
+        ResetForSpawn(1f, 1f, 1f);
+    }
+
+    // Called while pooled/inactive, after Awake and before OnEnable.
+    public void ResetForSpawn(float healthMultiplier, float speedMultiplier, float damageMultiplier)
+    {
         StopHitFlash(true);
 
-        currentHealth = maxHealth;
+        HealthMultiplier = SanitizeMultiplier(healthMultiplier);
+        SpeedMultiplier = SanitizeMultiplier(speedMultiplier);
+        DamageMultiplier = SanitizeMultiplier(damageMultiplier);
+        contactDamage = Mathf.Max(0f, baseContactDamage) * DamageMultiplier;
+        currentHealth = MaxHealth;
         isDead = false;
 
         ResetMovementState();
@@ -608,6 +632,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         simulationTimer = Random.Range(0f, 0.2f);
     }
 
+
+    private static float SanitizeMultiplier(float multiplier)
+    {
+        return float.IsNaN(multiplier) || float.IsInfinity(multiplier)
+            ? 1f : Mathf.Max(0f, multiplier);
+    }
 
     public void TakeDamage(float damage, int criticalHits)
     {
@@ -680,7 +710,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         DamageNumberPool.ShowDamage(
             numberPosition,
             displayedDamage,
-            maxHealth,
+            MaxHealth,
             lethalHit,
             criticalHits
         );
@@ -862,13 +892,14 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private void StopHitFlash(bool restoreMaterials)
     {
-        if (hitFlashRoutine != null)
+        bool wasFlashing = hitFlashRoutine != null;
+        if (wasFlashing)
         {
             StopCoroutine(hitFlashRoutine);
             hitFlashRoutine = null;
         }
 
-        if (restoreMaterials)
+        if (restoreMaterials && wasFlashing)
             RestoreOriginalMaterials();
     }
 
@@ -882,7 +913,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         StopHitFlash(true);
 
-        playerInventory.ReportKill(gameObject);
+        if (playerInventory != null) playerInventory.ReportKill(gameObject);
 
         // Spawn pooled death particles.
         if (deathParticlePool != null)
@@ -915,7 +946,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private void DropXP()
     {
-        xpBlobPool.Spawn(transform.position, xpDropValue);
+        if (xpBlobPool != null) xpBlobPool.Spawn(transform.position, xpDropValue);
     }
 
     public void ReceiveThornsDamage(float damage)

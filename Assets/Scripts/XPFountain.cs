@@ -5,8 +5,8 @@ using UnityEngine;
 public sealed class XPFountain : MonoBehaviour
 {
     [Header("References")]
-    [SerializeField] private PlayerLevelSystem levelSystem;
-    [SerializeField] private PlayerLevelRewardSystem rewardSystem;
+    [SerializeField] public PlayerLevelSystem levelSystem;
+    [SerializeField] public PlayerLevelRewardSystem rewardSystem;
 
     [Header("Distance Detection")]
     [SerializeField, Min(0.1f)] private float interactionDistance = 3f;
@@ -34,23 +34,16 @@ public sealed class XPFountain : MonoBehaviour
 
     private bool isBanking;
 
-    private void Awake()
-    {
-        if (rewardSystem == null && levelSystem != null)
-            rewardSystem = levelSystem.GetComponent<PlayerLevelRewardSystem>();
+    public Animator anim;
+    public AnimationClip spawnAnim;
+    public AnimationClip leaveAnim;
 
-        if (levelSystem == null && rewardSystem != null)
-            levelSystem = rewardSystem.LevelSystem;
+    public AudioClip thudSound;
+    public AudioClip grabSound;
+    public AudioClip enterSound;
 
-        if (levelSystem == null || rewardSystem == null)
-        {
-            Debug.LogError(
-                "XPFountain: Assign the player's PlayerLevelSystem " +
-                "and PlayerLevelRewardSystem.",
-                this
-            );
-        }
-    }
+    public ParticleSystem p1;
+    public ParticleSystem p2;
 
     private void Update()
     {
@@ -73,6 +66,35 @@ public sealed class XPFountain : MonoBehaviour
             return;
 
         TransferBankedLevels(target.position);
+    }
+
+    public void SpawnIn()
+    {
+        AudioManager.Play3D(enterSound, transform.position, 1, 1, 1, 100);
+        anim.Play(spawnAnim.name);
+        Invoke(nameof(PlayThudSound), 1);
+    }
+
+    public void Leave()
+    {
+        AudioManager.Play3D(enterSound, transform.position, 1, 1, 1, 100);
+        anim.Play(leaveAnim.name);
+        Invoke(nameof(PlayGrabSound), 1.1f);
+        Destroy(this.gameObject, 2.45f);
+    }
+
+    public void PlayThudSound()
+    {
+        AudioManager.Play3D(thudSound, transform.position, 1, 1, 1, 100);
+        p1.Play();
+        p2.Play();
+    }
+
+    public void PlayGrabSound()
+    {
+        AudioManager.Play3D(grabSound, transform.position, 0.75f, 1, 1, 100);
+        p1.Play();
+        p2.Play();
     }
 
     private void FindNearbyPlayerOrVehicle()

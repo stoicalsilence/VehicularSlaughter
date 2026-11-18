@@ -58764,8 +58764,8 @@ MonoBehaviour:
   wallStickSpeed: 1.5
   minimumClimbUpDot: 0.1
   xpBlobPool: {fileID: 0}
-  xpDropValue: 5
-  maxHealth: 30
+  xpDropValue: 25
+  maxHealth: 25
   contactDamage: 5
   hitFlashDuration: 0.08
   deathParticlePool: {fileID: 0}

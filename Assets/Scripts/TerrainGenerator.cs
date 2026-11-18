@@ -118,6 +118,15 @@ public class TerrainGenerator : MonoBehaviour
 
     private readonly List<Vector3> occupiedPositions = new List<Vector3>();
 
+    [Header("Runtime POI Placement")]
+    [SerializeField, Min(0f)] private float runtimePOIClearance = 7f;
+    [SerializeField, Range(0f, 60f)] private float runtimePOIMaxSlope = 18f;
+    [SerializeField, Min(1)] private int runtimePOIAttempts = 100;
+    [Tooltip("Optional: only layers for blockers such as buildings, trees or rocks. Exclude terrain.")]
+    [SerializeField] private LayerMask runtimePOIBlockerMask;
+
+    private readonly List<GameObject> runtimePOIs = new List<GameObject>();
+
     [Header("Terrain Textures")]
     [Tooltip("Terrain Layers distributed across the terrain using noise.")]
     public TerrainLayer[] terrainLayers;
@@ -211,6 +220,7 @@ public class TerrainGenerator : MonoBehaviour
         EnsureGeneratedObjectsRoot();
         ClearSpawnedObjects();
         occupiedPositions.Clear();
+        runtimePOIs.Clear();
 
         System.Random placementRandom = new System.Random(seed);
         System.Random noiseRandom = new System.Random(unchecked(seed ^ 0x5F3759DF));
@@ -768,6 +778,89 @@ public class TerrainGenerator : MonoBehaviour
         normalizedX = 0f;
         normalizedZ = 0f;
         return false;
+    }
+
+    /// <summary>Checks the terrain rectangle and physical boundary inset.</summary>
+    public bool IsInsidePlayableArea(Vector3 worldPosition, float padding = 0f)
+    {
+        if (terrain == null || terrain.terrainData == null) return false;
+        Vector3 local = worldPosition - terrain.transform.position;
+        Vector3 size = terrain.terrainData.size;
+        float inset = createBoundaryWalls
+            ? Mathf.Clamp(boundaryInset, 0f, Mathf.Min(size.x, size.z) * 0.25f) : 0f;
+        inset += Mathf.Max(0f, padding);
+        return local.x >= inset && local.z >= inset &&
+               local.x <= size.x - inset && local.z <= size.z - inset;
+    }
+
+    /// <summary>Places a temporary POI near an anchor without regenerating the map.
+    /// Returns null if no candidate passes terrain, spacing and optional blocker checks.
+    /// The caller owns its lifetime. Destroyed POIs do not reserve positions.</summary>
+    public GameObject SpawnRuntimePOI(GameObject prefab, Vector3 anchor, float minDistance, float maxDistance, bool iscrate = false)
+    {
+        if (prefab == null || terrain == null || terrain.terrainData == null) return null;
+
+        EnsureGeneratedObjectsRoot();
+        runtimePOIs.RemoveAll(poi => poi == null || !poi.activeSelf);
+        TerrainData data = terrain.terrainData;
+        Vector3 origin = terrain.transform.position;
+        Vector3 size = data.size;
+        float margin = Mathf.Clamp(placementEdgeMargin, 0f, 0.45f);
+        float min = Mathf.Max(0f, minDistance);
+        float max = Mathf.Max(min, maxDistance);
+        float clearance = Mathf.Max(0f, runtimePOIClearance);
+        float spacing = Mathf.Max(minimumSpacing, clearance);
+        float spacingSquared = spacing * spacing;
+        float maxSlope = Mathf.Min(maxPlacementSlope, runtimePOIMaxSlope);
+        int attempts = Mathf.Max(1, runtimePOIAttempts);
+
+        if (runtimePOIBlockerMask.value != 0) Physics.SyncTransforms();
+
+        for (int i = 0; i < attempts; i++)
+        {
+            float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            float distance = Mathf.Sqrt(UnityEngine.Random.Range(min * min, max * max));
+            Vector3 pos = anchor + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+            if (!IsInsidePlayableArea(pos, clearance)) continue;
+
+            float x = (pos.x - origin.x) / size.x;
+            float z = (pos.z - origin.z) / size.z;
+            if (x < margin || x > 1f - margin || z < margin || z > 1f - margin) continue;
+            if (data.GetSteepness(x, z) > maxSlope) continue;
+            pos.y = terrain.SampleHeight(pos) + origin.y;
+
+            bool blocked = false;
+            foreach (Vector3 occupied in occupiedPositions)
+            {
+                Vector3 offset = pos - occupied;
+                offset.y = 0f;
+                if (offset.sqrMagnitude < spacingSquared) { blocked = true; break; }
+            }
+            if (blocked) continue;
+
+            foreach (GameObject poi in runtimePOIs)
+            {
+                Vector3 offset = pos - poi.transform.position;
+                offset.y = 0f;
+                if (offset.sqrMagnitude < spacingSquared) { blocked = true; break; }
+            }
+            if (blocked) continue;
+
+            if (clearance > 0f && runtimePOIBlockerMask.value != 0 &&
+                Physics.CheckSphere(pos + Vector3.up, clearance, runtimePOIBlockerMask, QueryTriggerInteraction.Ignore))
+                continue;
+
+            if (iscrate)
+            {
+                pos += new Vector3(0, 6, 0);
+            }
+
+            GameObject instance = Instantiate(prefab, pos,
+                Quaternion.Euler(0f, UnityEngine.Random.Range(0f, 360f), 0f), generatedObjectsRoot);
+            runtimePOIs.Add(instance);
+            return instance;
+        }
+        return null;
     }
 
     private void EnsureGeneratedObjectsRoot()

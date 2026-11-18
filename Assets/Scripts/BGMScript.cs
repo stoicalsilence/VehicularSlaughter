@@ -19,12 +19,30 @@ public class BGMScript : MonoBehaviour
     private AudioClip lastPlayed;
     private Coroutine playbackRoutine;
 
+    [Header("Pause Muffle")]
+    [SerializeField] private bool muffleOnPause = true;
+
+    [SerializeField, Range(10f, 22000f)]
+    private float normalCutoff = 22000f;
+
+    [SerializeField, Range(10f, 22000f)]
+    private float muffledCutoff = 800f;
+
+    [SerializeField, Min(0f)]
+    private float muffleTransitionSpeed = 5f;
+
+    private AudioLowPassFilter lowPassFilter;
+
     private void Awake()
     {
         audioSource = GetComponent<AudioSource>();
+        lowPassFilter = GetComponent<AudioLowPassFilter>();
 
         audioSource.playOnAwake = false;
         audioSource.loop = false;
+
+        lowPassFilter.cutoffFrequency = normalCutoff;
+        lowPassFilter.lowpassResonanceQ = 1f;
     }
 
     private void Start()
@@ -33,6 +51,19 @@ public class BGMScript : MonoBehaviour
         {
             StartPlaylist();
         }
+    }
+
+    private void Update()
+    {
+        float targetCutoff = muffleOnPause && Time.timeScale == 0f
+            ? muffledCutoff
+            : normalCutoff;
+
+        lowPassFilter.cutoffFrequency = Mathf.Lerp(
+            lowPassFilter.cutoffFrequency,
+            targetCutoff,
+            1f - Mathf.Exp(-muffleTransitionSpeed * Time.unscaledDeltaTime)
+        );
     }
 
     public void StartPlaylist()
@@ -83,7 +114,7 @@ public class BGMScript : MonoBehaviour
             // Wait before starting the next track.
             if (pauseBetweenTracks > 0f)
             {
-                yield return new WaitForSeconds(pauseBetweenTracks);
+                yield return new WaitForSecondsRealtime(pauseBetweenTracks);
             }
         }
     }

@@ -47,6 +47,10 @@ public sealed class PlayerStats : MonoBehaviour
     [SerializeField, Min(0f)] public float itemLuck = 0f;
     [SerializeField, Min(1f)] public float xpGain = 1f;
 
+    [Header("Difficulty")]
+    [Tooltip("1 = 100% difficulty. 1.25 = 125%. Read by HordeManager.")]
+    [SerializeField, Min(1f)] public float difficulty = 1f;
+
     [Header("Radio")]
     public float radioChargeRate = 0.25f;
     public float radioRepositionCooldown = 10f;
@@ -115,6 +119,7 @@ public sealed class PlayerStats : MonoBehaviour
 
         itemLuck = Mathf.Max(0f, itemLuck);
         xpGain = Mathf.Max(1f, xpGain);
+        difficulty = float.IsNaN(difficulty) || float.IsInfinity(difficulty) ? 1f : Mathf.Max(1f, difficulty);
 
         radioChargeRate = Mathf.Max(0.01f, radioChargeRate);
         radioRepositionCooldown = Mathf.Max(0f, radioRepositionCooldown);
