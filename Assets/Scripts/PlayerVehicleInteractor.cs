@@ -76,13 +76,20 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     {
         if (currentVehicle != null)
         {
+            // Defensive fallback if the car's immediate ejection did not reach this occupant.
+            if (currentCarController != null && currentCarController.IsVehicleWrecked)
+            {
+                currentCarController.EjectOccupant(this);
+                return;
+            }
+
             nearbyVehicle = null;
             SetPromptActive(enterPrompt, false);
             SetPromptActive(exitPrompt, true);
 
             if (Input.GetKeyDown(interactKey))
             {
-                    ExitVehicle();
+                ExitVehicle();
             }
 
             return;
@@ -119,6 +126,10 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             if (seat == null || !seat.CanBeEnteredByPlayer)
                 continue;
 
+            CarController car = FindCarController(seat);
+            if (car != null && car.IsVehicleWrecked)
+                continue;
+
             Vector3 closestPoint = candidateCollider.ClosestPoint(origin);
             float distanceSqr = (closestPoint - origin).sqrMagnitude;
             if (distanceSqr < bestDistanceSqr)
@@ -133,10 +144,17 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
     private void EnterVehicle(VehicleSeat seat)
     {
-        if (seat == null || !seat.TryOccupy())
+        if (seat == null)
             return;
 
-        currentCarController = FindCarController(seat);
+        CarController car = FindCarController(seat);
+        if (car != null && car.IsVehicleWrecked)
+            return;
+
+        if (!seat.TryOccupy())
+            return;
+
+        currentCarController = car;
 
         if (currentCarController == null)
         {
@@ -186,13 +204,41 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         currentVehicle = seat;
         nearbyVehicle = null;
 
-        crosshair.SetActive(false);
+        if (crosshair != null) crosshair.SetActive(false);
 
         SetPromptActive(enterPrompt, false);
         SetPromptActive(exitPrompt, true);
     }
 
-    private void ExitVehicle()
+    public void ForceEjectFromVehicle(CarController car, Vector3 explosionCentre,
+        float horizontalSpeed, float verticalSpeed)
+    {
+        if (car == null || currentVehicle == null || currentCarController != car)
+            return;
+
+        Transform exitPoint = currentVehicle.ExitPoint;
+        Vector3 exitPosition = exitPoint != null ? exitPoint.position : transform.position;
+        Vector3 outward = Vector3.ProjectOnPlane(exitPosition - explosionCentre, Vector3.up);
+        if (outward.sqrMagnitude < 0.001f)
+            outward = Vector3.ProjectOnPlane(car.transform.right, Vector3.up);
+        if (outward.sqrMagnitude < 0.001f)
+            outward = Vector3.right;
+        outward.Normalize();
+
+        Rigidbody carBody = car.GetComponent<Rigidbody>();
+        Vector3 inheritedVelocity = carBody != null ? carBody.GetPointVelocity(exitPosition) : Vector3.zero;
+        // Use horizontal momentum only; give an upward launch even if the car is falling.
+        Vector3 launchVelocity = Vector3.ProjectOnPlane(inheritedVelocity, Vector3.up)
+            + outward * Mathf.Max(0f, horizontalSpeed)
+            + Vector3.up * Mathf.Max(0f, verticalSpeed);
+
+        // ExitVehicle restores parenting, seat occupancy, cameras and movement first.
+        ExitVehicle(true);
+        if (playerController != null && playerController.enabled)
+            playerController.Launch(launchVelocity);
+    }
+
+    private void ExitVehicle(bool forced = false)
     {
         if (currentVehicle == null)
             return;
@@ -235,6 +281,18 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             );
         }
 
+        if (forced)
+        {
+            if (exitPoint == null)
+            {
+                Vector3 forward = Vector3.ProjectOnPlane(vehicle.transform.forward, Vector3.up);
+                transform.rotation = forward.sqrMagnitude > 0.001f
+                    ? Quaternion.LookRotation(forward, Vector3.up) : Quaternion.identity;
+            }
+            PlaceEjectedPlayerOutsideCar(vehicle);
+            Physics.SyncTransforms();
+        }
+
         vehicle.Release();
 
         currentVehicle = null;
@@ -267,10 +325,75 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             playerController.enabled = previousPlayerControllerEnabled;
         }
 
-        crosshair.SetActive(true);
+        if (crosshair != null) crosshair.SetActive(true);
 
         SetPromptActive(enterPrompt, false);
         SetPromptActive(exitPrompt, false);
+    }
+
+    // Called while the CharacterController is still disabled. Prefer the configured
+    // ExitPoint; if it is obstructed, try positions above the car's solid colliders.
+    private void PlaceEjectedPlayerOutsideCar(VehicleSeat vehicle)
+    {
+        Physics.SyncTransforms();
+        if (vehicle.ExitPoint != null && IsEjectionPositionClear(transform.position))
+            return;
+
+        Transform carRoot = currentCarController != null ? currentCarController.transform : vehicle.transform;
+        float roof = carRoot.position.y;
+        foreach (Collider col in carRoot.GetComponentsInChildren<Collider>())
+        {
+            if (col.enabled && !col.isTrigger && !col.transform.IsChildOf(transform))
+                roof = Mathf.Max(roof, col.bounds.max.y);
+        }
+
+        float feetOffset = 0f;
+        if (characterController != null)
+        {
+            float scaleY = Mathf.Abs(transform.lossyScale.y);
+            feetOffset = (characterController.height * 0.5f - characterController.center.y) * scaleY;
+        }
+
+        Vector3 candidate = new Vector3(carRoot.position.x, roof + feetOffset + 0.25f, carRoot.position.z);
+        Vector3 side = Vector3.ProjectOnPlane(carRoot.right, Vector3.up).normalized;
+        if (side.sqrMagnitude < 0.001f) side = Vector3.right;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 raised = candidate + Vector3.up * i;
+            if (IsEjectionPositionClear(raised)) { transform.position = raised; return; }
+            if (IsEjectionPositionClear(raised + side * 2f)) { transform.position = raised + side * 2f; return; }
+            if (IsEjectionPositionClear(raised - side * 2f)) { transform.position = raised - side * 2f; return; }
+        }
+
+        // No free nearby capsule was found (for example, a cramped tunnel).
+        // Fall back to the roof rather than leaving the player attached to the wreck.
+        transform.position = candidate;
+        Debug.LogWarning("Vehicle ejection: no unobstructed exit position found.", this);
+    }
+
+    private bool IsEjectionPositionClear(Vector3 position)
+    {
+        if (characterController == null)
+            return true;
+
+        Vector3 scale = transform.lossyScale;
+        float radius = characterController.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+        float halfHeight = Mathf.Max(radius, characterController.height * Mathf.Abs(scale.y) * 0.5f);
+        float segment = Mathf.Max(0f, halfHeight - radius);
+        Vector3 centre = position + transform.TransformVector(characterController.center);
+        float queryRadius = Mathf.Max(0.01f, radius - characterController.skinWidth);
+        foreach (Collider col in Physics.OverlapCapsule(centre - Vector3.up * segment,
+            centre + Vector3.up * segment, queryRadius, ~0, QueryTriggerInteraction.Ignore))
+        {
+            if (col.transform == transform || col.transform.IsChildOf(transform))
+                continue;
+            if (Physics.GetIgnoreLayerCollision(gameObject.layer, col.gameObject.layer))
+                continue;
+            if (Physics.GetIgnoreCollision(characterController, col))
+                continue;
+            return false;
+        }
+        return true;
     }
 
     private void OnDisable()

@@ -181,7 +181,9 @@ public sealed class HordeManager : MonoBehaviour
     private int lastFountainMode = -1;
 
     public GameObject cratePrefab;
+    public GameObject corruptedCratePrefab;
     public float crateSpawnInterval;
+    public float corruptedCrateSpawnChance = 40;
 
     // Active enemies.
     private readonly List<HordeEnemy> activeEnemies =
@@ -711,11 +713,11 @@ public sealed class HordeManager : MonoBehaviour
             }
         }
         if (IsSwarmActive && !wasActive)
-            Announce("SWARM ACTIVE!", swarmColor, (newWarning || startedWithoutWarning) ? swarmWarningSound : null, 4);
+            Announce("HORDE INCOMING!", swarmColor, (newWarning || startedWithoutWarning) ? swarmWarningSound : null, 4);
         else if (newWarning)
-            Announce("SWARM INCOMING", swarmColor, swarmWarningSound, 4);
+            Announce("HORDE INCOMING", swarmColor, swarmWarningSound, 4);
         else if (wasActive && !IsSwarmActive)
-            Announce("SWARM SUBSIDING", fountainColor, null, 1);
+            Announce("HORDE SUBSIDING", fountainColor, null, 1);
     }
 
     private void UpdateFountains()
@@ -856,8 +858,8 @@ public sealed class HordeManager : MonoBehaviour
         if (swarmStatusText != null && (swarmMode != lastSwarmMode || swarmSeconds != lastSwarmSeconds))
         {
             lastSwarmMode = swarmMode; lastSwarmSeconds = swarmSeconds;
-            swarmStatusText.text = swarmMode == 2 ? $"SWARM ACTIVE  {FormatTime(swarmSeconds)}" :
-                swarmMode == 1 ? $"SWARM INCOMING  {FormatTime(swarmSeconds)}" : "";
+            swarmStatusText.text = swarmMode == 2 ? $"HORDE ACTIVE  {FormatTime(swarmSeconds)}" :
+                swarmMode == 1 ? $"HORDE INCOMING  {FormatTime(swarmSeconds)}" : "";
         }
 
         int fountainMode = IsRunning && ActiveFountain != null ? 1 : 0;
@@ -901,8 +903,8 @@ public sealed class HordeManager : MonoBehaviour
     {
         if (RemainingSeconds > 5)
         {
-            terrainGenerator.SpawnRuntimePOI(cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
-            terrainGenerator.SpawnRuntimePOI(cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
+            terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
+            terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
 
             for(int i = 0; i < 10; i++)
             {
@@ -910,7 +912,7 @@ public sealed class HordeManager : MonoBehaviour
 
                 if(r < (playerStats.itemLuck))
                 {
-                    terrainGenerator.SpawnRuntimePOI(cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
+                    terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
                 }
             }
         }

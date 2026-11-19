@@ -295,6 +295,9 @@ public sealed class PlayerInventory : MonoBehaviour
     public AudioClip getEpicSound;
     public AudioClip getLegendarySound;
     public AudioClip choirSound;
+    public AudioClip takeItemSound;
+    public AudioClip banishSound;
+    public AudioClip[] breakCrateSounds;
 
     /// <summary>
     /// Collected items, grouped by ItemDefinition. Each entry contains the
@@ -442,6 +445,9 @@ public sealed class PlayerInventory : MonoBehaviour
     {
         if (isOpen || isClosing || crate == null || choicePanel == null)
             return false;
+
+        int index = UnityEngine.Random.Range(0, breakCrateSounds.Length); 
+        AudioManager.Play2D(breakCrateSounds[index], 0.6f);
 
         ItemDefinition item = RollItem();
 
@@ -1258,6 +1264,8 @@ public sealed class PlayerInventory : MonoBehaviour
         if (!banishedItems.Add(item))
             return false;
 
+        AudioManager.Play2D(banishSound);
+
         banishesRemaining--;
 
         InventoryChanged?.Invoke();
@@ -1457,6 +1465,8 @@ public sealed class PlayerInventory : MonoBehaviour
 
         if (CollectItem(offeredItem))
             ResolveChoice();
+
+        AudioManager.Play2D(takeItemSound);
     }
 
     private void DiscardCurrentItem()

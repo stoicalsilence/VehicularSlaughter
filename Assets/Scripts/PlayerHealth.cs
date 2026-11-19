@@ -10,7 +10,7 @@ public sealed class PlayerHealth : MonoBehaviour
 {
     public PlayerStats playerStats;
 
-    private float maxHealth => playerStats.maxHealth;
+    private float maxHealth => playerStats.MaxHealth;
 
     private float damageCooldown => playerStats.damageCooldown;
 
@@ -82,7 +82,7 @@ public sealed class PlayerHealth : MonoBehaviour
             return;
         }
 
-        playerStats.maxHealth = Mathf.Max(1f, maxHealth);
+        playerStats.MaxHealth = Mathf.Max(1f, maxHealth);
         currentHealth = maxHealth;
 
         characterController = GetComponent<CharacterController>();
@@ -97,8 +97,17 @@ public sealed class PlayerHealth : MonoBehaviour
     }
 
 
+
     private void Update()
     {
+        // Always enforce maximum health, regardless of regeneration.
+        if (currentHealth > MaxHealth)
+        {
+            currentHealth = MaxHealth;
+            HealthChanged?.Invoke(currentHealth, MaxHealth);
+        }
+
+        // Regeneration checks.
         if (
             playerStats.hpRegeneration <= 0f ||
             currentHealth <= 0f ||
@@ -120,6 +129,7 @@ public sealed class PlayerHealth : MonoBehaviour
             HealthChanged?.Invoke(currentHealth, MaxHealth);
         }
     }
+
 
 
     private void DetectEnemiesTouchingPlayer()
@@ -398,9 +408,16 @@ public sealed class PlayerHealth : MonoBehaviour
         }
     }
 
+    private void OnEnable()
+    {
+        if (playerStats != null)
+            playerStats.MaxHealthChanged += OnMaxHealthChanged;
+    }
+
     private void OnDisable()
     {
-        playerStats.MaxHealthChanged -= OnMaxHealthChanged;
+        if (playerStats != null)
+            playerStats.MaxHealthChanged -= OnMaxHealthChanged;
     }
 
     private void OnMaxHealthChanged(float oldMax, float newMax)

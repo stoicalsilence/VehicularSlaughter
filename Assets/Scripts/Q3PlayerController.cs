@@ -11,6 +11,7 @@ namespace Q3Movement
     public class Q3PlayerController : MonoBehaviour
     {
         public PlayerInventory playerInventory;
+        public StatTradeSystem statTradeSys;
 
         [Header("Aiming")]
         [SerializeField] private Camera m_Camera;
@@ -237,6 +238,17 @@ namespace Q3Movement
         /// </summary>
         private void UpdateGrounding(float dt)
         {
+            // CharacterController.isGrounded can still describe the previous Move.
+            // Do not let that stale contact or the ground probe cancel a fresh launch.
+            if (m_JumpGroundLockTimer > 0f && m_PlayerVelocity.y > 0f)
+            {
+                m_IsGrounded = false;
+                m_OnSteepSlope = false;
+                m_GroundNormal = Vector3.up;
+                m_GroundGap = float.PositiveInfinity;
+                m_TimeSinceGrounded += dt;
+                return;
+            }
             bool controllerGrounded = m_Character.isGrounded;
             RaycastHit hit;
             bool foundGround = ProbeGround(out hit);
@@ -553,6 +565,14 @@ namespace Q3Movement
                 m_MovementAudioSource.PlayOneShot(m_JumpClip, m_JumpVolume);
         }
 
+        /// <summary>Starts a world-space ballistic launch using the normal Q3 movement physics.</summary>
+        public void Launch(Vector3 worldVelocity)
+        {
+            ResetMovementState();
+            m_PlayerVelocity = worldVelocity;
+            m_JumpGroundLockTimer = Mathf.Max(0.2f, m_JumpGroundLockTime);
+        }
+
         public void ResetMovementState()
         {
             m_PlayerVelocity = Vector3.zero;
@@ -651,6 +671,11 @@ namespace Q3Movement
             if (hit.gameObject.TryGetComponent<ItemCrate>(out ItemCrate crate))
             {
                 playerInventory.TryOpenCrate(crate);
+            } 
+            else
+            if (hit.gameObject.TryGetComponent<StatTradePickup>(out StatTradePickup corruptedCrate))
+            {
+                statTradeSys.TryOpen(corruptedCrate);
             }
         }
     }

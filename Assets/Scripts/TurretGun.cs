@@ -280,6 +280,10 @@ public class TurretGun : MonoBehaviour
 
         isReloading = false;
         hasAimTweenRotation = false;
+        currentTarget = null;
+        markedTarget = null;
+        nextTargetScanTime = 0f;
+        nextAimTweenTime = 0f;
 
         if (bulletTracer != null)
             bulletTracer.enabled = false;
@@ -302,6 +306,7 @@ public class TurretGun : MonoBehaviour
 
     public void MarkTarget(Transform target)
     {
+        if (!isActiveAndEnabled) return;
         markedTarget = target;
         currentTarget = target;
 
@@ -560,7 +565,17 @@ public class TurretGun : MonoBehaviour
 
             finalDamage += GetBonusSodaDamage();
 
+            if(playerInventory.HasItemByName("OP Turret"))
+            {
+                finalDamage *= 2;
+            }
+
             ApplyDamage(hit, finalDamage, criticalHits);
+            if (!isActiveAndEnabled)
+            {
+                currentAmmo = Mathf.Max(0, currentAmmo - 1);
+                return;
+            }
 
             if (hit.collider.gameObject.layer == 7)
             {
@@ -792,7 +807,7 @@ public class TurretGun : MonoBehaviour
 
     private void BeginReload()
     {
-        if (isReloading || currentAmmo >= magazineSize)
+        if (!isActiveAndEnabled || isReloading || currentAmmo >= magazineSize)
             return;
 
         isReloading = true;
@@ -904,6 +919,6 @@ public class TurretGun : MonoBehaviour
 
         int stacks = playerInventory.GetStacksByName("Bonus Soda");
 
-        return playerStats.maxHealth * 0.2f * stacks;
+        return playerStats.MaxHealth * 0.2f * stacks;
     }
 }

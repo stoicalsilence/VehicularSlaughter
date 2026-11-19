@@ -10,7 +10,7 @@ using UnityEngine;
 public sealed class PlayerStats : MonoBehaviour
 {
     [Header("Survivability")]
-    [SerializeField, Min(1f)] public float maxHealth = 100f;
+    [SerializeField, Min(1f)] private float maxHealth = 100f;
     [SerializeField, Min(0f)] public float damageCooldown = 0.75f;
     [SerializeField, Min(0f)] public float thornsDamage = 5f;
     [SerializeField, Min(0f)] public float hpRegeneration = 0f;

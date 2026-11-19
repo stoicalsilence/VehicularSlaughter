@@ -5,7 +5,6 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
-using System.Collections.Generic;
 
 public sealed class PlayerRadio : MonoBehaviour
 {
@@ -26,8 +25,6 @@ public sealed class PlayerRadio : MonoBehaviour
 
     private float airstrikeGhostYaw;
 
-    private readonly HashSet<HordeEnemy> airstrikeHitEnemies =
-        new HashSet<HordeEnemy>();
 
     [Header("Arms")]
     public GameObject weaponArms;
@@ -222,7 +219,7 @@ public sealed class PlayerRadio : MonoBehaviour
 
         armsRotationTween?.Kill();
 
-        armsRotationTween = weaponArms.transform.DOLocalRotate(weaponArmsOriginalRotation.eulerAngles + new Vector3(90f, 0f, 0f),0.5f).SetEase(Ease.InOutCubic);
+        armsRotationTween = weaponArms.transform.DOLocalRotate(weaponArmsOriginalRotation.eulerAngles + new Vector3(90f, 0f, 0f), 0.5f).SetEase(Ease.InOutCubic);
 
         yield return new WaitForSeconds(0.5f);
 
@@ -571,6 +568,7 @@ public sealed class PlayerRadio : MonoBehaviour
             case CallType.RespawnCar:
 
                 TeleportCar();
+                carController.RespawnVehicle();
 
                 AudioManager.Play2D(resetCarSound, 0.3f);
 
@@ -652,7 +650,7 @@ public sealed class PlayerRadio : MonoBehaviour
         Vector3 strikeDirection = airstrikeRotation * Vector3.forward;
 
         int planeHeightOffset = 0;
-        if(playerStats.radioAirstrikeScale > 6)
+        if (playerStats.radioAirstrikeScale > 6)
         {
             planeHeightOffset = 6;
         }
@@ -705,65 +703,12 @@ public sealed class PlayerRadio : MonoBehaviour
     public void DoAirStrikeExplosion(Vector3 airstrikePosition, float scaleMod)
     {
         float scale = playerStats.radioAirstrikeScale;
-
-        float damage =
-            playerStats.radioAirstrikeDamage *
-            playerStats.radioAirstrikeDamageMultiplier;
-
+        float damage = playerStats.radioAirstrikeDamage * playerStats.radioAirstrikeDamageMultiplier;
         float damageRadius = airstrikeBaseDamageRadius * (scale + scaleMod);
 
-        if (airstrikeExplosion != null)
-        {
-            GameObject explosion = Instantiate(
-                airstrikeExplosion,
-                airstrikePosition + new Vector3(0, 2, 0),
-                Quaternion.identity
-            );
-
-            explosion.transform.localScale *= scale;
-
-            // Scale all child particle systems as well.
-            ParticleSystem[] particleSystems =
-                explosion.GetComponentsInChildren<ParticleSystem>(true);
-
-            foreach (ParticleSystem ps in particleSystems)
-            {
-                var main = ps.main;
-                main.scalingMode = ParticleSystemScalingMode.Hierarchy;
-            }
-
-            Destroy(explosion, airstrikeExplosionLifetime);
-        }
-
-        if (damage <= 0f || damageRadius <= 0f)
-            return;
-
-        Collider[] hits = Physics.OverlapSphere(
-            airstrikePosition,
-            damageRadius,
-            ~0,
-            QueryTriggerInteraction.Ignore
-        );
-
-        airstrikeHitEnemies.Clear();
-
-        foreach (Collider hit in hits)
-        {
-            HordeEnemy enemy = hit.GetComponentInParent<HordeEnemy>();
-
-            if (enemy == null || enemy.IsDead)
-                continue;
-
-            if (!airstrikeHitEnemies.Add(enemy))
-                continue;
-
-            enemy.TakeDamage(
-                damage,
-                airstrikePosition,
-                airstrikeKnockbackForce,
-                0
-            );
-        }
+        ExplosionUtility.Explode(airstrikeExplosion,
+            airstrikePosition, airstrikePosition + Vector3.up * 2f,
+            damageRadius, damage, airstrikeKnockbackForce, scale, airstrikeExplosionLifetime);
     }
 
     private void BeginReturn()

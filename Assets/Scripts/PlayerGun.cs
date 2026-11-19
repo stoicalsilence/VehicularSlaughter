@@ -924,6 +924,6 @@ public sealed class PlayerGun : MonoBehaviour
 
         int stacks = playerInventory.GetStacksByName("Bonus Soda");
 
-        return playerStats.maxHealth * 0.2f * stacks;
+        return playerStats.MaxHealth * 0.2f * stacks;
     }
 }

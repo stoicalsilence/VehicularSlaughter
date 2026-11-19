@@ -23,19 +23,19 @@ public class CarController : MonoBehaviour
 
     //CAR SETUP
     public int maxSpeed => carStats.maxSpeed; //The maximum speed that the car can reach in km/h.
-    
+
     public int maxReverseSpeed => carStats.maxReverseSpeed; //The maximum speed that the car can reach while going on reverse in km/h.
-    
+
     public int accelerationMultiplier => carStats.accelerationMultiplier; // How fast the car can accelerate. 1 is a slow acceleration and 10 is the fastest.
-    
+
     public int maxSteeringAngle => carStats.maxSteeringAngle; // The maximum angle that the tires can reach while rotating the steering wheel.
-    
+
     public float steeringSpeed => carStats.steeringSpeed; // How fast the steering wheel turns.
-    
+
     public int brakeForce => carStats.brakeForce; // The strength of the wheel brakes.
-    
+
     public int decelerationMultiplier => carStats.decelerationMultiplier; // How fast the car decelerates when the user is not using the throttle.
-    
+
     public int handbrakeDriftMultiplier => carStats.handbrakeDriftMultiplier; // How much grip the car loses when the user hit the handbrake.
     [Space(10)]
     public Vector3 bodyMassCenter; // This is a vector that contains the center of mass of the car. I recommend to set this value
@@ -187,6 +187,24 @@ public class CarController : MonoBehaviour
     public float currentVehicleHealth;
     public bool vehicleWrecked;
 
+    [Header("Vehicle Destruction")]
+    [SerializeField] private PlayerRadio playerRadio;
+    [Tooltip("Optional override. If empty, reuse the radio's airstrike explosion prefab.")]
+    [SerializeField] private GameObject carExplosionPrefab;
+    [Tooltip("Optional blast centre. Defaults to the car's centre of mass.")]
+    [SerializeField] private Transform carExplosionPoint;
+    [SerializeField, Min(0.01f)] private float carExplosionBaseVisualRadius = 5f;
+    [SerializeField, Min(0f)] private float carExplosionKnockback = 8f;
+    [SerializeField, Min(0.1f)] private float carExplosionLifetime = 3f;
+    [SerializeField] private ParticleSystem wreckFire;
+    [SerializeField] private TurretGun vehicleTurret;
+    [SerializeField] private XPBlobCollector vehicleXPCollector;
+    [SerializeField, Min(0f)] private float ejectionHorizontalSpeed = 12f;
+    [SerializeField, Min(0f)] private float ejectionVerticalSpeed = 10f;
+
+    private bool turretWasEnabled;
+    private bool collectorWasEnabled;
+
     public TextMeshProUGUI lastDamageTakenText;
     private float enemyContactDamageCooldown => carStats.enemyContactDamageCooldown;
 
@@ -269,10 +287,10 @@ public class CarController : MonoBehaviour
     [SerializeField, Tooltip("When false, keyboard/touch driving input is ignored. Vehicle physics and effects continue.")]
     private bool playerDrivingEnabled = true;
 
-    public bool PlayerDrivingEnabled => playerDrivingEnabled;
+    public bool PlayerDrivingEnabled => playerDrivingEnabled && !vehicleWrecked;
     public void SetPlayerDrivingEnabled(bool value)
     {
-        playerDrivingEnabled = value;
+        playerDrivingEnabled = value && !vehicleWrecked;
     }
     /*
     The following variables are used to store information about sideways friction of the wheels (such as
@@ -304,6 +322,21 @@ public class CarController : MonoBehaviour
             enabled = false;
             return;
         }
+        // Cache these before the player is parented to the vehicle.
+        if (vehicleTurret == null)
+            vehicleTurret = GetComponentInChildren<TurretGun>(true);
+
+        if (vehicleXPCollector == null)
+        {
+            foreach (XPBlobCollector collector in GetComponentsInChildren<XPBlobCollector>(true))
+            {
+                if (collector.GetComponentInParent<PlayerVehicleInteractor>() != null)
+                    continue;
+
+                vehicleXPCollector = collector;
+                break;
+            }
+        }
     }
 
     // Start is called before the first frame update
@@ -318,6 +351,8 @@ public class CarController : MonoBehaviour
         currentVehicleHealth = maxVehicleHealth;
         vehicleWrecked = false;
         vehicleHealthInitialized = true;
+        if (wreckFire != null)
+            wreckFire.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
 
@@ -440,7 +475,7 @@ public class CarController : MonoBehaviour
             }
         }
 
-        lastDamageTakenText.text = "";
+        HideLastDamageText();
     }
 
     // Handle enemy gameplay impacts separately from optional crash VFX/audio.
@@ -525,7 +560,7 @@ public class CarController : MonoBehaviour
 
     private void HandleEnemyImpact(Collision collision)
     {
-        if (!enableVehicleImpactSystem || carRigidbody == null)
+        if (!enableVehicleImpactSystem || vehicleWrecked || carRigidbody == null)
             return;
 
         HordeEnemy enemy = collision.collider != null
@@ -669,47 +704,158 @@ public class CarController : MonoBehaviour
             return;
 
         currentVehicleHealth = Mathf.Max(0f, currentVehicleHealth - damage);
-        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
 
         PlayDamageFeedback();
-
         CancelInvoke(nameof(HideLastDamageText));
-        int damageInt = (int)damage;
-        lastDamageTakenText.text = "-" + damageInt.ToString();
-        Invoke(nameof(HideLastDamageText), 5);
-
-        if (currentVehicleHealth <= 0f && !vehicleWrecked)
+        if (lastDamageTakenText != null)
         {
-            vehicleWrecked = true;
-            OnVehicleHealthDepleted();
+            lastDamageTakenText.text = "-" + ((int)damage).ToString();
+            Invoke(nameof(HideLastDamageText), 5f);
         }
+
+        if (currentVehicleHealth <= 0f)
+            OnVehicleHealthDepleted();
+
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
     }
 
     private void HideLastDamageText()
     {
-        lastDamageTakenText.text = "";
+        if (lastDamageTakenText != null)
+            lastDamageTakenText.text = "";
     }
 
-    /// <summary>Restores vehicle health. A positive repair can bring a wrecked car back into service.</summary>
+    /// <summary>Repairs an operational vehicle. Only RespawnVehicle revives a wreck.</summary>
     public void RepairVehicle(float amount)
     {
-        if (!enableVehicleImpactSystem || amount <= 0f)
+        if (!enableVehicleImpactSystem || vehicleWrecked || amount <= 0f)
             return;
 
         currentVehicleHealth = Mathf.Min(maxVehicleHealth, currentVehicleHealth + amount);
-        if (currentVehicleHealth > 0f)
-            vehicleWrecked = false;
+        VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
+    }
+
+    /// <summary>Fully heals the car, including a wreck, without instantiating a new one.</summary>
+    public void RespawnVehicle()
+    {
+        bool wasWrecked = vehicleWrecked;
+        currentVehicleHealth = maxVehicleHealth;
+        vehicleWrecked = false;
+        enemyContactStates.Clear();
+        staleEnemyContacts.Clear();
+        CancelInvoke(nameof(HideLastDamageText));
+        HideLastDamageText();
+
+        if (wreckFire != null)
+            wreckFire.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        if (wasWrecked)
+        {
+            // The seat will enable driving again when the player enters.
+            SetPlayerDrivingEnabled(false);
+            ReleaseBrakes();
+            if (vehicleTurret != null)
+                vehicleTurret.enabled = turretWasEnabled;
+            if (vehicleXPCollector != null)
+                vehicleXPCollector.enabled = collectorWasEnabled;
+        }
 
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
     }
 
-    /// <summary>
-    /// Called once when vehicle health first reaches zero.
-    /// Intentionally empty: reaching zero health does not currently change driving.
-    /// </summary>
+    /// <summary>Single, guarded transition from operational car to wreck.</summary>
     private void OnVehicleHealthDepleted()
     {
-        // TODO: Add vehicle destruction behaviour here if desired in the future.
+        if (vehicleWrecked)
+            return;
+
+        vehicleWrecked = true;
+        currentVehicleHealth = 0f;
+        SetPlayerDrivingEnabled(false);
+        enemyContactStates.Clear();
+        staleEnemyContacts.Clear();
+
+        if (vehicleTurret != null)
+        {
+            turretWasEnabled = vehicleTurret.enabled;
+            vehicleTurret.enabled = false;
+        }
+        if (vehicleXPCollector != null)
+        {
+            collectorWasEnabled = vehicleXPCollector.enabled;
+            vehicleXPCollector.enabled = false;
+        }
+
+        Vector3 blastCentre = GetExplosionCentre();
+
+        // The occupant is a child of the seat in the existing interactor.
+        // Eject before dealing explosion damage so all player state is restored.
+        foreach (PlayerVehicleInteractor occupant in GetComponentsInChildren<PlayerVehicleInteractor>(true))
+        {
+            if (occupant.currentCarController == this)
+                EjectOccupant(occupant);
+        }
+
+        StopWreckDriving();
+
+        if (wreckFire != null)
+            wreckFire.Play(true);
+
+        // Stats are read at destruction time, so runtime upgrades apply immediately.
+        float damage = carStats != null ? carStats.carExplosionDamage : 100f;
+        float radius = carStats != null ? carStats.carExplosionDamageRange : 10f;
+        GameObject prefab = carExplosionPrefab != null ? carExplosionPrefab :
+            (playerRadio != null ? playerRadio.airstrikeExplosion : null);
+
+        ExplosionUtility.Explode(prefab, blastCentre, blastCentre,
+            radius, damage, carExplosionKnockback,
+            Mathf.Max(0f, radius) / Mathf.Max(0.01f, carExplosionBaseVisualRadius),
+            carExplosionLifetime);
+    }
+
+    private Vector3 GetExplosionCentre()
+    {
+        return carExplosionPoint != null ? carExplosionPoint.position :
+            (carRigidbody != null ? carRigidbody.worldCenterOfMass : transform.position);
+    }
+
+    public void EjectOccupant(PlayerVehicleInteractor occupant)
+    {
+        if (vehicleWrecked && occupant != null)
+            occupant.ForceEjectFromVehicle(this, GetExplosionCentre(), ejectionHorizontalSpeed, ejectionVerticalSpeed);
+    }
+
+    private void StopWreckDriving()
+    {
+        CancelInvoke(nameof(DecelerateCar));
+        CancelInvoke(nameof(RecoverTraction));
+        deceleratingCar = false;
+        throttleAxis = steeringAxis = driftingAxis = 0f;
+        localVelocityX = localVelocityZ = 0f;
+        isDrifting = isTractionLocked = false;
+
+        // Restore original tyre grip immediately, even if the car died mid-drift.
+        FLwheelFriction.extremumSlip = FLWextremumSlip;
+        FRwheelFriction.extremumSlip = FRWextremumSlip;
+        RLwheelFriction.extremumSlip = RLWextremumSlip;
+        RRwheelFriction.extremumSlip = RRWextremumSlip;
+        frontLeftCollider.sidewaysFriction = FLwheelFriction;
+        frontRightCollider.sidewaysFriction = FRwheelFriction;
+        rearLeftCollider.sidewaysFriction = RLwheelFriction;
+        rearRightCollider.sidewaysFriction = RRwheelFriction;
+
+        frontLeftCollider.steerAngle = frontRightCollider.steerAngle = 0f;
+        ThrottleOff();
+
+        if (carEngineSound != null) carEngineSound.Stop();
+        if (tireScreechSound != null) tireScreechSound.Stop();
+        if (exhaustParticles != null)
+            exhaustParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        if (RLWParticleSystem != null) RLWParticleSystem.Stop();
+        if (RRWParticleSystem != null) RRWParticleSystem.Stop();
+        if (RLWTireSkid != null) RLWTireSkid.emitting = false;
+        if (RRWTireSkid != null) RRWTireSkid.emitting = false;
+        SetBrakeLights(false);
     }
 
     void PlayCrashEffects(ParticleSystem particlePrefab, AudioClip sound, Vector3 impactPoint, Vector3 impactNormal)
@@ -760,6 +906,31 @@ public class CarController : MonoBehaviour
                 tireScreechSound.Stop();
             }
 
+            return;
+        }
+
+        if (vehicleHealthInitialized &&
+    currentVehicleHealth > maxVehicleHealth)
+        {
+            currentVehicleHealth = maxVehicleHealth;
+
+            VehicleHealthChanged?.Invoke(
+                currentVehicleHealth,
+                maxVehicleHealth
+            );
+        }
+
+        if (!vehicleWrecked && currentVehicleHealth <= 0f)
+        {
+            OnVehicleHealthDepleted();
+            VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
+        }
+
+        if (vehicleWrecked)
+        {
+            // Keep the wreck physically present and its wheel meshes synchronized.
+            carSpeed = carRigidbody.velocity.magnitude * 3.6f;
+            AnimateWheelMeshes();
             return;
         }
 
@@ -1014,6 +1185,7 @@ public class CarController : MonoBehaviour
     // Apart from that, the tireScreechSound will play whenever the car starts drifting or losing traction.
     public void CarSounds()
     {
+        if (vehicleWrecked) return;
         if (useSounds)
         {
             if (carEngineSound != null && !carEngineSound.isPlaying)
@@ -1064,6 +1236,7 @@ public class CarController : MonoBehaviour
     //The following method turns the front car wheels to the left. The speed of this movement will depend on the steeringSpeed variable.
     public void TurnLeft()
     {
+        if (vehicleWrecked) return;
         steeringAxis = steeringAxis - (Time.deltaTime * 10f * steeringSpeed);
         if (steeringAxis < -1f)
         {
@@ -1077,6 +1250,7 @@ public class CarController : MonoBehaviour
     //The following method turns the front car wheels to the right. The speed of this movement will depend on the steeringSpeed variable.
     public void TurnRight()
     {
+        if (vehicleWrecked) return;
         steeringAxis = steeringAxis + (Time.deltaTime * 10f * steeringSpeed);
         if (steeringAxis > 1f)
         {
@@ -1091,6 +1265,7 @@ public class CarController : MonoBehaviour
     // on the steeringSpeed variable.
     public void ResetSteeringAngle()
     {
+        if (vehicleWrecked) return;
         if (steeringAxis < 0f)
         {
             steeringAxis = steeringAxis + (Time.deltaTime * 10f * steeringSpeed);
@@ -1150,6 +1325,7 @@ public class CarController : MonoBehaviour
     // This method apply positive torque to the wheels in order to go forward.
     public void GoForward()
     {
+        if (vehicleWrecked) return;
         //If the forces aplied to the rigidbody in the 'x' asis are greater than
         //3f, it means that the car is losing traction, then the car will start emitting particle systems.
         if (Mathf.Abs(localVelocityX) > 2.5f)
@@ -1205,6 +1381,7 @@ public class CarController : MonoBehaviour
     // This method apply negative torque to the wheels in order to go backwards.
     public void GoReverse()
     {
+        if (vehicleWrecked) return;
         //If the forces aplied to the rigidbody in the 'x' asis are greater than
         //3f, it means that the car is losing traction, then the car will start emitting particle systems.
         if (Mathf.Abs(localVelocityX) > 2.5f)
@@ -1264,7 +1441,10 @@ public class CarController : MonoBehaviour
         frontRightCollider.motorTorque = 0f;
         rearLeftCollider.motorTorque = 0f;
         rearRightCollider.motorTorque = 0f;
-        ReleaseBrakes();
+        if (vehicleWrecked)
+            Brakes();
+        else
+            ReleaseBrakes();
     }
 
     // Clears service-brake torque when the controller is no longer braking.
@@ -1281,6 +1461,7 @@ public class CarController : MonoBehaviour
     // usually every 0.1f when the user is not pressing W (throttle), S (reverse) or Space bar (handbrake).
     public void DecelerateCar()
     {
+        if (vehicleWrecked) return;
         if (Mathf.Abs(localVelocityX) > 2.5f)
         {
             isDrifting = true;
@@ -1344,6 +1525,7 @@ public class CarController : MonoBehaviour
     // it is high, then you could make the car to feel like going on ice.
     public void Handbrake()
     {
+        if (vehicleWrecked) return;
         CancelInvoke("RecoverTraction");
         // We are going to start losing traction smoothly, there is were our 'driftingAxis' variable takes
         // place. This variable will start from 0 and will reach a top value of 1, which means that the maximum
@@ -1398,6 +1580,7 @@ public class CarController : MonoBehaviour
     // depending on the value of the bool variables 'isDrifting' and 'isTractionLocked'.
     public void DriftCarPS()
     {
+        if (vehicleWrecked) return;
 
         if (useEffects)
         {
@@ -1462,6 +1645,7 @@ public class CarController : MonoBehaviour
     // This function is used to recover the traction of the car when the user has stopped using the car's handbrake.
     public void RecoverTraction()
     {
+        if (vehicleWrecked) return;
         // Keep only one scheduled recovery call, even if this method is triggered
         // from more than one input path.
         CancelInvoke(nameof(RecoverTraction));
@@ -1540,11 +1724,15 @@ public class CarController : MonoBehaviour
     private void PlayDamageFeedback()
     {
         // Play hit sound
-        AudioManager.Play3D(damageSound, transform.position, 1, 1, 1, 100);
+        if (damageSound != null)
+            AudioManager.Play3D(damageSound, transform.position, 1, 1, 1, 100);
 
         // Play damage particles
-        damageParticles.Stop();
-        damageParticles.Play();
+        if (damageParticles != null)
+        {
+            damageParticles.Stop();
+            damageParticles.Play();
+        }
     }
 
     private float GetSpeedTowardEnemyKmh(HordeEnemy enemy)
@@ -1605,10 +1793,7 @@ public class CarController : MonoBehaviour
         currentVehicleHealth = Mathf.Min(currentVehicleHealth, newMax);
 
         if (currentVehicleHealth <= 0f && !vehicleWrecked)
-        {
-            vehicleWrecked = true;
             OnVehicleHealthDepleted();
-        }
 
         VehicleHealthChanged?.Invoke(currentVehicleHealth, newMax);
     }
