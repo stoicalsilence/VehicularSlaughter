@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening;
+using Random = UnityEngine.Random;
 
 public sealed class PlayerRadio : MonoBehaviour
 {
@@ -627,6 +628,22 @@ public sealed class PlayerRadio : MonoBehaviour
         }
 
         Physics.SyncTransforms();
+    }
+
+    /// <summary>
+    /// Item-triggered airstrike at a marked special enemy's death position.
+    /// Does not consume radio charge or modify manual radio cooldowns.
+    /// Uses existing damage, delay, visuals, Matchbox synergy and AirstrikeRequested event.
+    /// </summary>
+    public void RequestBeaconAirstrike(Vector3 deathPosition)
+    {
+        if (!isActiveAndEnabled || playerStats == null)
+            return;
+
+        Quaternion direction = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+        if (airSupportInbound != null)
+            AudioManager.Play2D(airSupportInbound, 0.3f);
+        StartCoroutine(AirstrikeDelayRoutine(deathPosition, direction));
     }
 
     private IEnumerator AirstrikeDelayRoutine(

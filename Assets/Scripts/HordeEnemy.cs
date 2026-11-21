@@ -113,6 +113,10 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     // Clear that mark before this pooled instance can be reused.
     public event System.Action<HordeEnemy> TurretTargetInvalidated;
 
+    // Fired only for genuine lethal damage, before this pooled enemy is invalidated.
+    // EMP self-detonation against a car intentionally does not trigger this event.
+    public event System.Action<HordeEnemy, Vector3> KilledAtPosition;
+
 
     [Header("Hit Feedback")]
     [SerializeField]
@@ -950,6 +954,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             return;
 
         isDead = true;
+        Vector3 deathPosition = transform.position;
+        KilledAtPosition?.Invoke(this, deathPosition);
         TurretTargetInvalidated?.Invoke(this);
 
         StopHitFlash(true);
@@ -958,8 +964,6 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             playerInventory.ReportKill(gameObject);
 
         HordeManager manager = HordeManager.Instance;
-
-        Vector3 deathPosition = transform.position;
 
         if (IsEMP && manager != null)
         {

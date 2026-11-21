@@ -175,12 +175,19 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             turret == null || !turret.isActiveAndEnabled)
             return;
 
-        // On foot or in a car, Q selects the visible enemy closest to screen centre.
-        // If no assisted target qualifies, fall back to the original exact raycast.
-        if (easyTargetMarking &&
-            TryEasyMark(aimCamera, turret, occupiedCarRoot))
+        // Exact crosshair hits always have priority. Only if the centre ray
+        // does not hit a living enemy do we try the forgiving nearby selection.
+        if (TryExactMark(aimCamera, turret, occupiedCarRoot))
             return;
 
+        if (easyTargetMarking)
+            TryEasyMark(aimCamera, turret, occupiedCarRoot);
+    }
+
+    // The first non-self collider on the centre ray must be a living enemy.
+    // World geometry remains solid and blocks enemies behind it.
+    private bool TryExactMark(Camera aimCamera, TurretGun turret, Transform occupiedCarRoot)
+    {
         Ray ray = aimCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         float distance = Mathf.Max(1f, markTargetDistance);
 
@@ -222,11 +229,14 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         }
 
         if (closest == null)
-            return;
+            return false;
 
         HordeEnemy enemy = closest.GetComponentInParent<HordeEnemy>();
-        if (enemy != null && enemy.isActiveAndEnabled && !enemy.IsDead)
-            turret.MarkTarget(enemy.transform);
+        if (enemy == null || !enemy.isActiveAndEnabled || enemy.IsDead)
+            return false;
+
+        turret.MarkTarget(enemy.transform);
+        return true;
     }
 
     // Called only on a Q press in either mode, not every frame.

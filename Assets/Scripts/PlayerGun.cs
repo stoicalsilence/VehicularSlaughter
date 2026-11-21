@@ -560,11 +560,6 @@ public sealed class PlayerGun : MonoBehaviour
 
         totalShotsFired++;
 
-        bool puteyAngryDoubleDamage =
-            playerInventory != null &&
-            playerInventory.HasItemByName("Putey (Angry)") &&
-            totalShotsFired % 10 == 0;
-
         foreach (RaycastHit hit in hits)
         {
             Transform target = hit.collider.transform.root;
@@ -625,11 +620,6 @@ public sealed class PlayerGun : MonoBehaviour
                 float damageMultiplier = 1f + (0.5f * stackCount);
 
                 finalDamage *= damageMultiplier;
-            }
-
-            if (puteyAngryDoubleDamage)
-            {
-                finalDamage *= 2f;
             }
 
             finalDamage += GetBonusSodaDamage();

@@ -46,11 +46,30 @@ public class TurretGun : MonoBehaviour
     private int SupportBeamsStacks => owningCar != null && owningCar.IsParkingBrakeEngaged &&
         playerInventory != null ? Mathf.Max(0, playerInventory.GetStacksByName("Support Beams")) : 0;
 
-    private float EffectiveFireRate => fireRate * (1f + 0.2f * SupportBeamsStacks);
+    [Header("Overclocked GPU (Epic Item)")]
+    [Tooltip("Marked Elite or EMP kills grant an overclock for this many seconds.")]
+    [SerializeField, Min(0.1f)] private float specialOverclockDuration = 10f;
+    [Tooltip("0.75 = +75% turret fire rate during the overclock.")]
+    [SerializeField, Range(0f, 2f)] private float specialOverclockFireRateBonus = 0.75f;
+    [Tooltip("0.40 = 40% shorter turret reload duration during the overclock.")]
+    [SerializeField, Range(0f, 0.9f)] private float specialOverclockReloadReduction = 0.40f;
 
-    // Additive -20% per stack, with a 5% minimum to avoid zero/negative reloads.
+    private float specialOverclockExpiresAt = -1f;
+
+    // Keep these public property names so other game scripts/UI stay compatible.
+    public bool MarkedMomentumOverclocked => Time.time < specialOverclockExpiresAt;
+    public bool MarkedMomentumActive => MarkedMomentumOverclocked;
+    public float MarkedMomentumRemaining =>
+        Mathf.Max(0f, specialOverclockExpiresAt - Time.time);
+
+    private float EffectiveFireRate => fireRate *
+        (1f + 0.2f * SupportBeamsStacks) *
+        (MarkedMomentumActive ? 1f + specialOverclockFireRateBonus : 1f);
+
+    // Support Beams and the temporary overclock remain independent modifiers.
     private float EffectiveReloadTime => Mathf.Max(0.01f, reloadTime) *
-        Mathf.Max(0.05f, 1f - 0.2f * SupportBeamsStacks);
+        Mathf.Max(0.05f, 1f - 0.2f * SupportBeamsStacks) *
+        (MarkedMomentumActive ? 1f - specialOverclockReloadReduction : 1f);
 
     [SerializeField] private float detectionRange => carStats.turretDetectionRange;
 
@@ -69,6 +88,18 @@ public class TurretGun : MonoBehaviour
     [SerializeField] private Vector3 targetAimOffset = new Vector3(0f, 1.2f, 0f);
 
     private const float MarkedTargetRangeMultiplier = 2f;
+
+    // Epic item: Zoomy Boi. Doubles ONLY the marked-target
+    // detection bonus (2x -> 4x), leaving ordinary detection unchanged.
+    // Intended as a unique, non-stackable inventory item.
+    private float EffectiveMarkedTargetRangeMultiplier =>
+        MarkedTargetRangeMultiplier *
+        (playerInventory != null && playerInventory.HasItemByName("Zoomy Boi")
+            ? 2f : 1f);
+
+    [Header("Zoomy Boi - Marked Target Critical Bonus")]
+    [Tooltip("Extra critical chance in percentage points only when the turret actually hits its marked enemy. 100 guarantees one additional critical tier.")]
+    [SerializeField, Min(0f)] private float zoomyBoiMarkedCriticalChanceBonus = 100f;
 
     [Header("Marked Target Indicator")]
     [Tooltip("Optional single scene object, shared by every marked enemy. No collider needed.")]
@@ -338,6 +369,7 @@ public class TurretGun : MonoBehaviour
 
         isReloading = false;
         hasAimTweenRotation = false;
+        specialOverclockExpiresAt = -1f;
         DisregardMarkedTarget();
         nextTargetScanTime = 0f;
         nextAimTweenTime = 0f;
@@ -396,7 +428,10 @@ public class TurretGun : MonoBehaviour
         // same Transform before the next turret Update, so polling alone
         // is not sufficient to identify a new enemy life.
         if (markedEnemy != null)
+        {
             markedEnemy.TurretTargetInvalidated += OnMarkedEnemyInvalidated;
+            markedEnemy.KilledAtPosition += OnMarkedEnemyKilled;
+        }
 
         UpdateMarkedIndicatorPose();
         SetMarkedIndicatorActive(true);
@@ -411,7 +446,10 @@ public class TurretGun : MonoBehaviour
     public void DisregardMarkedTarget()
     {
         if (markedEnemy != null)
+        {
             markedEnemy.TurretTargetInvalidated -= OnMarkedEnemyInvalidated;
+            markedEnemy.KilledAtPosition -= OnMarkedEnemyKilled;
+        }
 
         markedEnemy = null;
         markedTarget = null;
@@ -420,6 +458,38 @@ public class TurretGun : MonoBehaviour
         nextTargetScanTime = 0f;
     }
 
+
+    // The marked enemy's death can be caused by PlayerGun, TurretGun, or another damage source.
+    // This event is subscribed to only for the currently marked enemy, and unsubscribed on invalidation.
+    private void OnMarkedEnemyKilled(HordeEnemy enemy, Vector3 deathPosition)
+    {
+        if (enemy == null || enemy != markedEnemy)
+            return;
+
+        if (playerInventory == null)
+            playerInventory = FindObjectOfType<PlayerInventory>();
+
+        if (playerInventory == null)
+            return;
+
+        // Only a marked Elite or EMP kill triggers / refreshes Overclocked GPU.
+        // Marked normal kills never grant a buff or modify its timer.
+        if ((enemy.IsElite || enemy.IsEMP) &&
+            playerInventory.HasItemByName("Overclocked GPU"))
+        {
+            specialOverclockExpiresAt = Time.time +
+                Mathf.Max(0.1f, specialOverclockDuration);
+        }
+
+        // Dead Man's Beacon still only activates for marked Elite and EMP enemies.
+        if ((!enemy.IsElite && !enemy.IsEMP) ||
+            !playerInventory.HasItemByName("Dead Man's Beacon"))
+            return;
+
+        PlayerRadio radio = FindObjectOfType<PlayerRadio>();
+        if (radio != null)
+            radio.RequestBeaconAirstrike(deathPosition);
+    }
 
     private void OnMarkedEnemyInvalidated(HordeEnemy enemy)
     {
@@ -506,7 +576,7 @@ public class TurretGun : MonoBehaviour
             }
             else
             {
-                float markedRange = normalRange * MarkedTargetRangeMultiplier;
+                float markedRange = normalRange * EffectiveMarkedTargetRangeMultiplier;
                 float distanceSqr = (markedTarget.position - origin).sqrMagnitude;
 
                 // O(1) per frame; no overlap query at the expanded radius.
@@ -719,11 +789,6 @@ public class TurretGun : MonoBehaviour
 
         totalShotsFired++;
 
-        bool puteyAngryDoubleDamage =
-            playerInventory != null &&
-            playerInventory.HasItemByName("Putey (Angry)") &&
-            totalShotsFired % 10 == 0;
-
         Vector3 shotDirection = ApplyAccuracySpread(baseDirection);
 
         // Use the effective range for both the ray and its visual tracer.
@@ -740,7 +805,18 @@ public class TurretGun : MonoBehaviour
         {
             tracerEnd = hit.point;
 
-            int criticalHits = RollCriticalHits();
+            // Award Zoomy Boi's +100 percentage-point critical chance ONLY if the
+            // projectile actually struck the marked enemy. An obstructing enemy
+            // or a stray shot never receives the bonus.
+            HordeEnemy hitEnemy = hit.collider.GetComponentInParent<HordeEnemy>();
+            bool hitMarkedEnemy = markedEnemy != null &&
+                hitEnemy == markedEnemy && !markedEnemy.IsDead &&
+                markedEnemy.isActiveAndEnabled;
+            float markCritBonus = hitMarkedEnemy && playerInventory != null &&
+                playerInventory.HasItemByName("Zoomy Boi")
+                    ? zoomyBoiMarkedCriticalChanceBonus : 0f;
+
+            int criticalHits = RollCriticalHits(markCritBonus);
 
             float finalDamage = CalculateCriticalDamage(
                 damagePerShot,
@@ -757,11 +833,6 @@ public class TurretGun : MonoBehaviour
             if (playerInventory.HasItemByName("OP Turret"))
             {
                 finalDamage *= 2;
-            }
-
-            if (puteyAngryDoubleDamage)
-            {
-                finalDamage *= 2f;
             }
 
             ApplyDamage(hit, finalDamage, criticalHits);
@@ -1079,12 +1150,15 @@ public class TurretGun : MonoBehaviour
 
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position,
-            detectionRange * MarkedTargetRangeMultiplier);
+            detectionRange * EffectiveMarkedTargetRangeMultiplier);
     }
 
-    private int RollCriticalHits()
+    private int RollCriticalHits(float additionalChance = 0f)
     {
-        float remainingChance = Mathf.Max(0f, criticalChance);
+        // The existing crit system awards one guaranteed tier per 100% chance.
+        // Adding 100 percentage points therefore awards one extra critical tier
+        // only on hits against the currently marked enemy.
+        float remainingChance = Mathf.Max(0f, criticalChance + additionalChance);
 
         // Every complete 100% guarantees another critical hit.
         int criticalHits = Mathf.FloorToInt(remainingChance / 100f);

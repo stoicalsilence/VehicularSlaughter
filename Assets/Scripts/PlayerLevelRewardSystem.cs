@@ -195,10 +195,6 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     [Tooltip("Luck increases higher-tier rarity weights by this amount per item-luck point and rarity tier. Example: 0.1 means each luck point adds 10% weight per tier.")]
     [SerializeField] private float luckWeightPerPoint = 0.1f;
 
-    [Min(1f)]
-    [Tooltip("Maximum multiplier applied to each rarity weight by Luck. Prevents extreme Luck values from completely dominating rarity rolls.")]
-    [SerializeField] private float maximumLuckWeightMultiplier = 3f;
-
     // ==================================================
     // GLOBAL MAGNITUDE RANGES
     // ==================================================
@@ -511,7 +507,6 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         epicWeight = 4f;
         legendaryWeight = 1f;
         luckWeightPerPoint = 0.1f;
-        maximumLuckWeightMultiplier = 3f;
         zeroValueFallbackRarityMultipliers = new Vector4(1f, 1.5f, 2.25f, 3.25f);
 
         Debug.Log("PlayerLevelRewardSystem: Recommended reward defaults restored. Review and save the component.", this);
@@ -704,7 +699,6 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         epicWeight = Mathf.Max(0f, epicWeight);
         legendaryWeight = Mathf.Max(0f, legendaryWeight);
         luckWeightPerPoint = Mathf.Max(0f, luckWeightPerPoint);
-        maximumLuckWeightMultiplier = Mathf.Max(1f, maximumLuckWeightMultiplier);
 
         if (percentageRanges != null)
             percentageRanges.Normalize(true);
@@ -1167,7 +1161,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private float GetLuckAdjustedWeight(float weight, float luck, int tier)
     {
-        return Mathf.Max(0f, weight) * Mathf.Min(1f + luck * luckWeightPerPoint * tier, maximumLuckWeightMultiplier);
+        // Match PlayerInventory's uncapped, tier-scaled Luck formula.
+        return Mathf.Max(0f, weight) * (1f + luck * tier * luckWeightPerPoint);
     }
 
     private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);

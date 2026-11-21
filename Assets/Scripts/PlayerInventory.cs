@@ -1727,4 +1727,59 @@ public sealed class PlayerInventory : MonoBehaviour
         RestoreGameState();
         DestroyPreview();
     }
+
+
+
+    public bool TryGetRarityDropChance(
+        ItemRarity targetRarity,
+        float luck,
+        out float chance)
+    {
+        chance = 0f;
+
+        float totalWeight = 0f;
+        float targetWeight = 0f;
+
+        for (int i = 0; i <= (int)ItemRarity.Legendary; i++)
+        {
+            ItemRarity rarity = (ItemRarity)i;
+            bool hasEligibleItem = false;
+
+            foreach (ItemDefinition item in itemPool)
+            {
+                if (item != null &&
+                    item.rarity == rarity &&
+                    CanAcquire(item))
+                {
+                    hasEligibleItem = true;
+                    break;
+                }
+            }
+
+            if (!hasEligibleItem)
+                continue;
+
+            float baseWeight = GetRarityWeight(rarity);
+
+            float multiplier =
+                1f + Mathf.Max(0f, luck) * i *
+                luckWeightPerPointPerTier;
+
+            float weight = Mathf.Max(0f, baseWeight * multiplier);
+
+            totalWeight += weight;
+
+            if (rarity == targetRarity)
+                targetWeight = weight;
+        }
+
+        if (totalWeight <= 0f)
+            return false;
+
+        chance = targetWeight / totalWeight * 100f;
+        return true;
+    }
+
+
+
 }
