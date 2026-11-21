@@ -1,5 +1,6 @@
 using Q3Movement;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Finds a nearby VehicleSeat and switches between the Q3 first-person controller and vehicle
@@ -27,6 +28,30 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     [Tooltip("Optional UI object shown while inside a vehicle. The prompt can explain the exit key.")]
     [SerializeField] private GameObject exitPrompt;
 
+    [Header("Turret Target Marking")]
+    [Tooltip("Initial car turret for marking on foot, before entering a vehicle.")]
+    [SerializeField] private TurretGun markingTurret;
+    [SerializeField] private KeyCode markTargetKey = KeyCode.Q;
+    [SerializeField, Min(1f)] private float markTargetDistance = 200f;
+    [Tooltip("Include enemy hitboxes and solid world geometry. Exclude non-blocking effects.")]
+    [SerializeField] private LayerMask markTargetLayers = ~0;
+
+    [Header("Easy Target Marking (On Foot + In Car)")]
+    [Tooltip("Press Q to mark a visible enemy near the screen centre, both on foot and in a car. Disable for exact crosshair marking.")]
+    [FormerlySerializedAs("easyMarkingInCar")]
+    [SerializeField] private bool easyTargetMarking = true;
+    [Tooltip("Horizontal aim-assist radius as a fraction of screen width (0.22 = 22%).")]
+    [FormerlySerializedAs("carMarkHorizontalRadius")]
+    [SerializeField, Range(0.02f, 0.5f)] private float markHorizontalRadius = 0.22f;
+    [Tooltip("Vertical aim-assist radius as a fraction of screen height.")]
+    [FormerlySerializedAs("carMarkVerticalRadius")]
+    [SerializeField, Range(0.02f, 0.5f)] private float markVerticalRadius = 0.25f;
+
+    private readonly Collider[] easyMarkCandidates = new Collider[128];
+    private TurretGun lastDrivenTurret;
+    private bool markRequested;
+    private readonly RaycastHit[] markHitBuffer = new RaycastHit[32];
+
     private readonly Collider[] overlapBuffer = new Collider[64];
     private VehicleSeat nearbyVehicle;
     private VehicleSeat currentVehicle;
@@ -44,6 +69,11 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     public AudioClip exitVehicleSound;
 
     public bool IsInVehicle => currentVehicle != null;
+
+    // The active gameplay view, independent of camera tags and driving input.
+    public Camera ActiveViewCamera => currentVehicle != null
+        ? currentVehicle.VehicleCamera
+        : playerCamera;
 
     private void Awake()
     {
@@ -74,6 +104,9 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
     private void Update()
     {
+        // Capture once regardless of whether Q3 movement is enabled.
+        markRequested = Time.timeScale > 0f && Input.GetKeyDown(markTargetKey);
+
         if (currentVehicle != null)
         {
             // Defensive fallback if the car's immediate ejection did not reach this occupant.
@@ -101,6 +134,196 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
         if (nearbyVehicle != null && Input.GetKeyDown(interactKey))
             EnterVehicle(nearbyVehicle);
+    }
+
+    private void LateUpdate()
+    {
+        if (!markRequested)
+            return;
+
+        markRequested = false;
+        if (Time.timeScale <= 0f)
+            return;
+
+        TryMarkTarget();
+    }
+
+    private void TryMarkTarget()
+    {
+        Camera aimCamera = ActiveViewCamera;
+        TurretGun turret;
+        Transform occupiedCarRoot = null;
+
+        if (currentVehicle != null)
+        {
+            if (currentCarController == null || currentCarController.IsVehicleWrecked)
+                return;
+
+            turret = currentCarController.VehicleTurret;
+            occupiedCarRoot = currentCarController.transform;
+        }
+        else
+        {
+            // Preserve the on-foot input gate of Q3PlayerController.
+            if (playerController == null || !playerController.isActiveAndEnabled)
+                return;
+
+            turret = lastDrivenTurret != null ? lastDrivenTurret : markingTurret;
+        }
+
+        if (aimCamera == null || !aimCamera.isActiveAndEnabled ||
+            turret == null || !turret.isActiveAndEnabled)
+            return;
+
+        // On foot or in a car, Q selects the visible enemy closest to screen centre.
+        // If no assisted target qualifies, fall back to the original exact raycast.
+        if (easyTargetMarking &&
+            TryEasyMark(aimCamera, turret, occupiedCarRoot))
+            return;
+
+        Ray ray = aimCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        float distance = Mathf.Max(1f, markTargetDistance);
+
+        // RaycastNonAlloc results are unordered. Find the nearest non-self hit.
+        // A full buffer is not guaranteed to contain the nearest hit, so fall
+        // back to RaycastAll only on saturation (and only on a Q press).
+        int count = Physics.RaycastNonAlloc(ray, markHitBuffer, distance,
+            markTargetLayers, QueryTriggerInteraction.Ignore);
+
+        RaycastHit[] hits = markHitBuffer;
+        if (count == markHitBuffer.Length)
+        {
+            hits = Physics.RaycastAll(ray, distance, markTargetLayers,
+                QueryTriggerInteraction.Ignore);
+            count = hits.Length;
+        }
+
+        Collider closest = null;
+        float closestDistance = float.PositiveInfinity;
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider candidate = hits[i].collider;
+            if (candidate == null || hits[i].distance >= closestDistance)
+                continue;
+
+            Transform hitTransform = candidate.transform;
+            if (hitTransform == transform || hitTransform.IsChildOf(transform))
+                continue;
+
+            // The third-person camera may look through the occupied car.
+            // Ignore its own body, but keep all other solid geometry blocking.
+            if (occupiedCarRoot != null &&
+                (hitTransform == occupiedCarRoot || hitTransform.IsChildOf(occupiedCarRoot)))
+                continue;
+
+            closest = candidate;
+            closestDistance = hits[i].distance;
+        }
+
+        if (closest == null)
+            return;
+
+        HordeEnemy enemy = closest.GetComponentInParent<HordeEnemy>();
+        if (enemy != null && enemy.isActiveAndEnabled && !enemy.IsDead)
+            turret.MarkTarget(enemy.transform);
+    }
+
+    // Called only on a Q press in either mode, not every frame.
+    private bool TryEasyMark(Camera camera, TurretGun turret, Transform carRoot)
+    {
+        Vector3 origin = camera.transform.position;
+        float maxDistance = Mathf.Max(1f, markTargetDistance);
+        int count = Physics.OverlapSphereNonAlloc(origin, maxDistance,
+            easyMarkCandidates, markTargetLayers, QueryTriggerInteraction.Ignore);
+
+        // Do not silently lose potential targets if the fixed buffer fills up.
+        Collider[] candidates = easyMarkCandidates;
+        if (count == easyMarkCandidates.Length)
+        {
+            candidates = Physics.OverlapSphere(origin, maxDistance,
+                markTargetLayers, QueryTriggerInteraction.Ignore);
+            count = candidates.Length;
+        }
+
+        HordeEnemy bestEnemy = null;
+        float bestScore = float.PositiveInfinity;
+        float horizontalRadius = Mathf.Max(0.02f, markHorizontalRadius);
+        float verticalRadius = Mathf.Max(0.02f, markVerticalRadius);
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = candidates[i];
+            if (col == null || !col.enabled)
+                continue;
+
+            HordeEnemy enemy = col.GetComponentInParent<HordeEnemy>();
+            if (enemy == null || !enemy.isActiveAndEnabled || enemy.IsDead)
+                continue;
+
+            // Use the collider's centre, so the player need not hit a tiny hitbox.
+            Vector3 target = col.bounds.center;
+            Vector3 screen = camera.WorldToViewportPoint(target);
+            if (screen.z <= 0f)
+                continue;
+
+            float x = (screen.x - 0.5f) / horizontalRadius;
+            float y = (screen.y - 0.5f) / verticalRadius;
+            float screenScore = x * x + y * y;
+            if (screenScore > 1f)
+                continue;
+
+            Vector3 direction = target - origin;
+            float range = direction.magnitude;
+            if (range < 0.001f || range > maxDistance)
+                continue;
+
+            // Prefer the most centred target, using distance as a tie-breaker.
+            float score = screenScore + 0.001f * (range / maxDistance);
+            if (score >= bestScore)
+                continue;
+
+            // Ignore the player and (when driving) the occupied car, but not obstacles.
+            Ray visibilityRay = new Ray(origin, direction / range);
+            int hitCount = Physics.RaycastNonAlloc(visibilityRay, markHitBuffer,
+                range + 0.05f, markTargetLayers, QueryTriggerInteraction.Ignore);
+            RaycastHit[] hits = markHitBuffer;
+            if (hitCount == markHitBuffer.Length)
+            {
+                hits = Physics.RaycastAll(visibilityRay, range + 0.05f,
+                    markTargetLayers, QueryTriggerInteraction.Ignore);
+                hitCount = hits.Length;
+            }
+
+            Collider first = null;
+            float firstDistance = float.PositiveInfinity;
+            for (int h = 0; h < hitCount; h++)
+            {
+                Collider hitCollider = hits[h].collider;
+                if (hitCollider == null || hits[h].distance >= firstDistance)
+                    continue;
+
+                Transform hit = hitCollider.transform;
+                if (hit == transform || hit.IsChildOf(transform) ||
+                    (carRoot != null && (hit == carRoot || hit.IsChildOf(carRoot))))
+                    continue;
+
+                first = hitCollider;
+                firstDistance = hits[h].distance;
+            }
+
+            if (first == null || first.GetComponentInParent<HordeEnemy>() != enemy)
+                continue;
+
+            bestScore = score;
+            bestEnemy = enemy;
+        }
+
+        if (bestEnemy == null)
+            return false;
+
+        turret.MarkTarget(bestEnemy.transform);
+        return true;
     }
 
     private VehicleSeat FindNearbyVehicle()
@@ -155,6 +378,8 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             return;
 
         currentCarController = car;
+        if (car != null && car.VehicleTurret != null)
+            lastDrivenTurret = car.VehicleTurret;
 
         if (currentCarController == null)
         {
@@ -398,6 +623,7 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
     private void OnDisable()
     {
+        markRequested = false;
         SetPromptActive(enterPrompt, false);
         SetPromptActive(exitPrompt, false);
 

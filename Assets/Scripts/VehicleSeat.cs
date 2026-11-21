@@ -25,6 +25,7 @@ public sealed class VehicleSeat : MonoBehaviour
     [SerializeField] private AudioListener vehicleAudioListener;
 
     public CarController CarController => carController;
+    public Camera VehicleCamera => vehicleCamera;
     public Transform DriverSeat => driverSeat;
     public Transform ExitPoint => exitPoint;
     public bool IsOccupied { get; private set; }

@@ -290,6 +290,7 @@ public sealed class PlayerInventory : MonoBehaviour
         carStatModifierTotalsByVehicle =
             new Dictionary<CarStats, Dictionary<CarStatToModify, StatModifierTotals>>();
 
+    public AudioClip opTurretFireSound;
     public AudioClip getCommonSound;
     public AudioClip getRareSound;
     public AudioClip getEpicSound;
@@ -372,6 +373,7 @@ public sealed class PlayerInventory : MonoBehaviour
     [SerializeField, Min(1)] private int cauldronKillsPerHealth = 50;
 
     private int totalEnemiesKilled;
+    private int cauldronEnemiesKilled;
     private int cauldronBonusHealthGranted;
 
     public int TotalEnemiesKilled => totalEnemiesKilled;
@@ -458,6 +460,14 @@ public sealed class PlayerInventory : MonoBehaviour
                 this);
 
             return false;
+        }
+
+        if (HasItemByName("Loot Goblin"))
+        {
+            int stacks = GetStacksByName("Loot Goblin");
+            playerStats.groundMoveSpeed += (1 * stacks);
+            carStats.maxSpeed += (15 * stacks);
+            carStats.accelerationMultiplier += (2 * stacks);
         }
 
         OpenChoiceMenu(item, crate);
@@ -748,6 +758,10 @@ public sealed class PlayerInventory : MonoBehaviour
                 if(itemName.Equals("An Actual Rabbit"))
                 {
                     FindObjectOfType<Q3Movement.Q3PlayerController>().m_AutoBunnyHop = true;
+                }
+                else if (itemName.Equals("OP Turret"))
+                {
+                    FindObjectOfType<TurretGun>().fireSound = opTurretFireSound;
                 }
                 return 0f;
             //for nones i set one time trigger items
@@ -1597,26 +1611,31 @@ public sealed class PlayerInventory : MonoBehaviour
 
         totalEnemiesKilled++;
 
-        UpdateCauldronBonus();
+        if (GetStacksByName("Cauldron") > 0)
+        {
+            cauldronEnemiesKilled++;
+            UpdateCauldronBonus();
+        }
 
         OnItemKill?.Invoke(target);
     }
 
     private void UpdateCauldronBonus()
     {
-        if (playerStats == null || !HasItemByName("Cauldron"))
+        if (playerStats == null)
             return;
 
         int cauldronStacks = GetStacksByName("Cauldron");
 
+        if (cauldronStacks <= 0)
+            return;
+
         int killsRequired = Mathf.Max(1, cauldronKillsPerHealth);
 
-        // Calculate the total health bonus earned so far.
-        int milestonesReached = totalEnemiesKilled / killsRequired;
+        int milestonesReached = cauldronEnemiesKilled / killsRequired;
 
         int totalEarnedHealth = milestonesReached * cauldronStacks * 4;
 
-        // Only apply newly earned health.
         int healthToAdd = totalEarnedHealth - cauldronBonusHealthGranted;
 
         if (healthToAdd <= 0)

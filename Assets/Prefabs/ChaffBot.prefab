@@ -58745,6 +58745,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2559e5406ccdb1429bfe551a1793c9c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  allowEliteVariant: 1
+  allowEmpVariant: 1
+  empBlueMaterial: {fileID: 2100000, guid: 0c334cd9d1da100488e7733eb65e2723, type: 2}
   moveSpeed: 4.5
   acceleration: 18
   turnSpeed: 720
@@ -58768,6 +58771,8 @@ MonoBehaviour:
   maxHealth: 25
   contactDamage: 5
   hitFlashDuration: 0.08
+  hitFlashMaterial: {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
+  flashEMPEnemies: 1
   deathParticlePool: {fileID: 0}
   playerInventory: {fileID: 0}
   deathSound: {fileID: 8300000, guid: c99e337f58429954f8e3bcdc2cee99d0, type: 3}

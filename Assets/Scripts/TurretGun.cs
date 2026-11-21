@@ -8,12 +8,16 @@ using UnityEngine;
 /// Requires DOTween.
 /// Uses one assigned LineRenderer for bullet tracers.
 /// </summary>
+// Run the indicator LateUpdate after ordinary camera LateUpdate callbacks.
+[DefaultExecutionOrder(100)]
 public class TurretGun : MonoBehaviour
 {
     [Header("References")]
     public CarStats carStats;
     private PlayerStats playerStats;
     private PlayerInventory playerInventory;
+    private CarController owningCar;
+    public AudioSource audioSource;
 
     [Tooltip("Transform that rotates to aim and moves into the reload pose.")]
     public Transform GunVisual;
@@ -38,6 +42,16 @@ public class TurretGun : MonoBehaviour
 
     [SerializeField] private float reloadTime => carStats.turretReloadTime;
 
+    // Support Beams only buffs the turret while its car's parking brake is engaged.
+    private int SupportBeamsStacks => owningCar != null && owningCar.IsParkingBrakeEngaged &&
+        playerInventory != null ? Mathf.Max(0, playerInventory.GetStacksByName("Support Beams")) : 0;
+
+    private float EffectiveFireRate => fireRate * (1f + 0.2f * SupportBeamsStacks);
+
+    // Additive -20% per stack, with a 5% minimum to avoid zero/negative reloads.
+    private float EffectiveReloadTime => Mathf.Max(0.01f, reloadTime) *
+        Mathf.Max(0.05f, 1f - 0.2f * SupportBeamsStacks);
+
     [SerializeField] private float detectionRange => carStats.turretDetectionRange;
 
     [SerializeField] private float maxShotDistance => carStats.turretMaxShotDistance;
@@ -54,7 +68,16 @@ public class TurretGun : MonoBehaviour
 
     [SerializeField] private Vector3 targetAimOffset = new Vector3(0f, 1.2f, 0f);
 
-    [SerializeField] private bool markedTargetMustBeInRange;
+    private const float MarkedTargetRangeMultiplier = 2f;
+
+    [Header("Marked Target Indicator")]
+    [Tooltip("Optional single scene object, shared by every marked enemy. No collider needed.")]
+    [SerializeField] private GameObject markedTargetIndicator;
+    [SerializeField] private Vector3 markedTargetIndicatorOffset = new Vector3(0f, 2.25f, 0f);
+    [Tooltip("Optional local rotation correction for the arrow artwork. Usually zero; try Y = 180 if the visible face is reversed.")]
+    [SerializeField] private Vector3 markedTargetIndicatorEulerOffset = Vector3.zero;
+    [Tooltip("Optional player reference for the active view camera. Automatically found once at Start if unassigned.")]
+    [SerializeField] private PlayerVehicleInteractor indicatorViewSource;
 
 
     [Header("Aiming (DOTween)")]
@@ -108,7 +131,7 @@ public class TurretGun : MonoBehaviour
 
     [Min(0.1f)]
     [SerializeField] private float casingLifetime = 4f;
-
+    private int totalShotsFired = 0;
     [SerializeField] private Vector2 casingSideForce = new Vector2(1.2f, 2.4f);
     [SerializeField] private Vector2 casingUpForce = new Vector2(0.5f, 1.2f);
 
@@ -117,12 +140,13 @@ public class TurretGun : MonoBehaviour
 
 
     [Header("Audio")]
-    [SerializeField] private AudioClip fireSound;
+    [SerializeField] public AudioClip fireSound;
     [SerializeField] private AudioClip critSound;
     [SerializeField] private AudioClip overcritSound;
     [SerializeField] private AudioClip overcritSound2;
     [SerializeField] private AudioClip overcritSound3;
     [SerializeField] private AudioClip overcritSound4;
+    [SerializeField] private AudioClip markTargetSound;
 
     [Range(0f, 1f)]
     [SerializeField] private float fireSoundVolume = 1f;
@@ -149,10 +173,13 @@ public class TurretGun : MonoBehaviour
 
     private Transform currentTarget;
     private Transform markedTarget;
+    private HordeEnemy markedEnemy;
 
     // Weapon state
     private int currentAmmo;
     private bool isReloading;
+    private bool empDisabled;
+    public bool IsEmpDisabled => empDisabled;
 
     private float nextShotTime;
     private float nextTargetScanTime;
@@ -171,6 +198,7 @@ public class TurretGun : MonoBehaviour
 
     private Tween aimTween;
     private Sequence reloadSequence;
+    private float reloadBaseDuration;
 
 
     public int CurrentAmmo => currentAmmo;
@@ -178,17 +206,18 @@ public class TurretGun : MonoBehaviour
     public bool IsReloading => isReloading;
     public Transform CurrentTarget => currentTarget;
     public bool HasMarkedTarget => markedTarget != null;
+    public Transform MarkedTarget => markedTarget;
 
 
     private void Awake()
     {
         if (carStats == null)
-            carStats = GetComponent<CarStats>();
+            carStats = GetComponentInParent<CarStats>();
 
         if (carStats == null)
         {
             Debug.LogError(
-                "CarController requires a CarStats component on the same GameObject.",
+                "TurretGun requires CarStats on itself or a parent GameObject.",
                 this
             );
 
@@ -196,7 +225,9 @@ public class TurretGun : MonoBehaviour
             return;
         }
 
+        owningCar = GetComponentInParent<CarController>();
         currentAmmo = magazineSize;
+        SetMarkedIndicatorActive(false);
 
         if (muzzleFlash != null)
             muzzleFlash.SetActive(false);
@@ -214,17 +245,24 @@ public class TurretGun : MonoBehaviour
     {
         playerStats = FindObjectOfType<PlayerStats>();
         playerInventory = FindObjectOfType<PlayerInventory>();
+
+        if (markedTargetIndicator != null && indicatorViewSource == null)
+            indicatorViewSource = FindObjectOfType<PlayerVehicleInteractor>();
     }
 
 
     private void Update()
     {
-        if (Time.timeScale <= 0f)
+        if (Time.timeScale <= 0f || empDisabled)
             return;
 
         UpdateMuzzleFlash();
         UpdateBulletTracer();
         UpdateTarget();
+
+        // Adjust in-progress reloads immediately when parking brake / stacks change.
+        if (isReloading && reloadSequence != null && reloadSequence.IsActive())
+            reloadSequence.timeScale = reloadBaseDuration / EffectiveReloadTime;
 
         if (GunVisual == null || isReloading)
             return;
@@ -258,19 +296,39 @@ public class TurretGun : MonoBehaviour
         float distanceToTarget =
             Vector3.Distance(shotOrigin, aimPoint);
 
-        if (distanceToTarget > maxShotDistance)
+        // Only a currently prioritized mark can bypass the normal weapon reach.
+        // Reach its aim point without globally changing the CarStats shot range.
+        float shotDistance = currentTarget == markedTarget
+            ? Mathf.Max(maxShotDistance, distanceToTarget)
+            : maxShotDistance;
+
+        if (distanceToTarget > shotDistance)
             return;
 
         if (Time.time >= nextShotTime &&
             Quaternion.Angle(GunVisual.rotation, desiredRotation)
                 <= aimToleranceDegrees)
         {
-            FireAtTarget(aimPoint, distanceToTarget);
+            FireAtTarget(aimPoint, shotDistance);
         }
     }
 
 
+    // Separate power state: never enable a gun that was disabled for another reason.
+    // Wreck handling can keep its original enabled-state bookkeeping.
+    public void SetEmpDisabled(bool value)
+    {
+        if (empDisabled == value) return;
+        empDisabled = value;
+        if (value) StopWeaponActivity();
+    }
+
     private void OnDisable()
+    {
+        StopWeaponActivity();
+    }
+
+    private void StopWeaponActivity()
     {
         aimTween?.Kill();
         reloadSequence?.Kill();
@@ -280,8 +338,7 @@ public class TurretGun : MonoBehaviour
 
         isReloading = false;
         hasAimTweenRotation = false;
-        currentTarget = null;
-        markedTarget = null;
+        DisregardMarkedTarget();
         nextTargetScanTime = 0f;
         nextAimTweenTime = 0f;
 
@@ -295,6 +352,7 @@ public class TurretGun : MonoBehaviour
 
     private void OnDestroy()
     {
+        DisregardMarkedTarget();
         aimTween?.Kill();
         reloadSequence?.Kill();
     }
@@ -306,26 +364,122 @@ public class TurretGun : MonoBehaviour
 
     public void MarkTarget(Transform target)
     {
-        if (!isActiveAndEnabled) return;
+        if (!isActiveAndEnabled || empDisabled)
+            return;
+
+        if (target == null)
+        {
+            DisregardMarkedTarget();
+            return;
+        }
+
+        // Resolve child hitboxes to the enemy root. Keep the existing public
+        // Transform API usable by other target types as well.
+        HordeEnemy enemy = target.GetComponentInParent<HordeEnemy>();
+        if (enemy != null)
+        {
+            if (enemy.IsDead || !enemy.isActiveAndEnabled)
+                return;
+
+            target = enemy.transform;
+        }
+
+        if (!target.gameObject.activeInHierarchy || target == transform ||
+            target.IsChildOf(transform) || target == markedTarget)
+            return;
+
+        DisregardMarkedTarget();
         markedTarget = target;
-        currentTarget = target;
+        markedEnemy = enemy;
 
-        nextTargetScanTime = 0f;
-        nextAimTweenTime = 0f;
+        // Subscribe ONLY to the selected enemy. Pooling can reuse the exact
+        // same Transform before the next turret Update, so polling alone
+        // is not sufficient to identify a new enemy life.
+        if (markedEnemy != null)
+            markedEnemy.TurretTargetInvalidated += OnMarkedEnemyInvalidated;
 
-        hasAimTweenRotation = false;
+        UpdateMarkedIndicatorPose();
+        SetMarkedIndicatorActive(true);
+
+        AudioManager.Play2D(markTargetSound, 1);
+
+        // Select immediately if in range; otherwise run ordinary targeting.
+        UpdateTarget();
     }
 
 
     public void DisregardMarkedTarget()
     {
+        if (markedEnemy != null)
+            markedEnemy.TurretTargetInvalidated -= OnMarkedEnemyInvalidated;
+
+        markedEnemy = null;
         markedTarget = null;
-        currentTarget = null;
-
+        SetMarkedIndicatorActive(false);
+        SetCurrentTarget(null);
         nextTargetScanTime = 0f;
-        nextAimTweenTime = 0f;
+    }
 
+
+    private void OnMarkedEnemyInvalidated(HordeEnemy enemy)
+    {
+        if (enemy == markedEnemy)
+            DisregardMarkedTarget();
+    }
+
+
+    private void SetCurrentTarget(Transform target)
+    {
+        bool changed = currentTarget != target;
+        currentTarget = target;
+
+        if (!changed)
+            return;
+
+        nextAimTweenTime = 0f;
         hasAimTweenRotation = false;
+    }
+
+
+    private void LateUpdate()
+    {
+        // A single world-space indicator follows the mark, including while
+        // the turret is using a temporary fallback target.
+        if (markedTarget != null && markedTargetIndicator != null)
+            UpdateMarkedIndicatorPose();
+    }
+
+
+    private void UpdateMarkedIndicatorPose()
+    {
+        if (markedTargetIndicator == null || markedTarget == null)
+            return;
+
+        Transform indicator = markedTargetIndicator.transform;
+        Vector3 position = markedTarget.position + markedTargetIndicatorOffset;
+        Camera viewCamera = indicatorViewSource != null
+            ? indicatorViewSource.ActiveViewCamera
+            : null;
+
+        if (viewCamera != null && viewCamera.isActiveAndEnabled)
+        {
+            // Screen-aligned billboard: world rotation follows the actual view,
+            // never the car, turret or enemy's inherited rotation.
+            Quaternion rotation = viewCamera.transform.rotation *
+                Quaternion.Euler(markedTargetIndicatorEulerOffset);
+            indicator.SetPositionAndRotation(position, rotation);
+        }
+        else
+        {
+            indicator.position = position;
+        }
+    }
+
+
+    private void SetMarkedIndicatorActive(bool active)
+    {
+        if (markedTargetIndicator != null && markedTargetIndicator.activeSelf != active)
+            markedTargetIndicator.SetActive(active);
     }
 
 
@@ -337,34 +491,47 @@ public class TurretGun : MonoBehaviour
 
     private void UpdateTarget()
     {
-        if (markedTarget != null)
+        Vector3 origin = transform.position;
+        float normalRange = Mathf.Max(0f, detectionRange);
+        float normalRangeSqr = normalRange * normalRange;
+
+        // ReferenceEquals distinguishes a destroyed Unity object from an
+        // actual null reference, so even non-HordeEnemy marks are cleaned up.
+        if (!ReferenceEquals(markedTarget, null))
         {
-            if (!markedTarget.gameObject.activeInHierarchy)
+            if (markedTarget == null || !markedTarget.gameObject.activeInHierarchy ||
+                (markedEnemy != null && (markedEnemy.IsDead || !markedEnemy.isActiveAndEnabled)))
             {
-                markedTarget = null;
-                currentTarget = null;
+                DisregardMarkedTarget();
             }
             else
             {
-                float distanceSqr =
-                    (markedTarget.position - transform.position).sqrMagnitude;
+                float markedRange = normalRange * MarkedTargetRangeMultiplier;
+                float distanceSqr = (markedTarget.position - origin).sqrMagnitude;
 
-                bool inRange =
-                    distanceSqr <= detectionRange * detectionRange;
+                // O(1) per frame; no overlap query at the expanded radius.
+                if (distanceSqr <= markedRange * markedRange)
+                {
+                    SetCurrentTarget(markedTarget);
+                    return;
+                }
 
-                currentTarget =
-                    (!markedTargetMustBeInRange || inRange)
-                    ? markedTarget
-                    : null;
-
-                return;
+                // The mark is retained but no longer has priority. Scan now
+                // rather than waiting for the normal scan timer.
+                if (currentTarget == markedTarget)
+                {
+                    SetCurrentTarget(null);
+                    nextTargetScanTime = 0f;
+                }
             }
         }
 
         if (currentTarget != null &&
-            !currentTarget.gameObject.activeInHierarchy)
+            (!currentTarget.gameObject.activeInHierarchy ||
+             (currentTarget.position - origin).sqrMagnitude > normalRangeSqr))
         {
-            currentTarget = null;
+            SetCurrentTarget(null);
+            nextTargetScanTime = 0f;
         }
 
         if (Time.time < nextTargetScanTime)
@@ -373,15 +540,17 @@ public class TurretGun : MonoBehaviour
         nextTargetScanTime =
             Time.time + Mathf.Max(0.01f, targetScanInterval);
 
-        currentTarget = FindClosestTarget();
+        SetCurrentTarget(FindClosestTarget());
     }
 
 
     private Transform FindClosestTarget()
     {
+        float normalRange = Mathf.Max(0f, detectionRange);
+        float normalRangeSqr = normalRange * normalRange;
         int count = Physics.OverlapSphereNonAlloc(
             transform.position,
-            detectionRange,
+            normalRange,
             detectionBuffer,
             enemyLayers,
             QueryTriggerInteraction.Collide);
@@ -418,7 +587,9 @@ public class TurretGun : MonoBehaviour
             float sqrDistance =
                 (candidate.position - transform.position).sqrMagnitude;
 
-            if (sqrDistance < closestSqrDistance)
+            // A collider can overlap the sphere even if its root is outside.
+            // Only the explicit mark is eligible for the expanded range.
+            if (sqrDistance <= normalRangeSqr && sqrDistance < closestSqrDistance)
             {
                 closestSqrDistance = sqrDistance;
                 closest = candidate;
@@ -433,6 +604,11 @@ public class TurretGun : MonoBehaviour
     {
         ITurretDamageable damageable =
             candidateCollider.GetComponentInParent<ITurretDamageable>();
+
+        // Dead or disabled horde enemies must not be picked back up by
+        // the fallback scan, even if their pool return is deferred.
+        if (damageable is HordeEnemy enemy && (enemy.IsDead || !enemy.isActiveAndEnabled))
+            return null;
 
         if (damageable is Component damageableComponent)
             return damageableComponent.transform;
@@ -528,7 +704,7 @@ public class TurretGun : MonoBehaviour
     // --------------------------------------------------
 
 
-    private void FireAtTarget(Vector3 aimPoint, float distanceToTarget)
+    private void FireAtTarget(Vector3 aimPoint, float shotDistance)
     {
         Vector3 shotOrigin = muzzlePoint != null
             ? muzzlePoint.position
@@ -541,17 +717,24 @@ public class TurretGun : MonoBehaviour
 
         baseDirection.Normalize();
 
+        totalShotsFired++;
+
+        bool puteyAngryDoubleDamage =
+            playerInventory != null &&
+            playerInventory.HasItemByName("Putey (Angry)") &&
+            totalShotsFired % 10 == 0;
+
         Vector3 shotDirection = ApplyAccuracySpread(baseDirection);
 
-        // Always fire the full ray distance.
-        Vector3 tracerEnd = shotOrigin + shotDirection * maxShotDistance;
+        // Use the effective range for both the ray and its visual tracer.
+        Vector3 tracerEnd = shotOrigin + shotDirection * shotDistance;
 
         // If something is hit, stop the tracer at the impact point.
         if (Physics.Raycast(
             shotOrigin,
             shotDirection,
             out RaycastHit hit,
-            maxShotDistance,
+            shotDistance,
             shotLayers,
             QueryTriggerInteraction.Ignore))
         {
@@ -563,15 +746,26 @@ public class TurretGun : MonoBehaviour
                 damagePerShot,
                 criticalHits);
 
+            if (playerInventory.HasItemByName("Advanced Computer System"))
+            {
+                int stacks = playerInventory.GetStacksByName("Advanced Computer System");
+                finalDamage += 25 * stacks;
+            }
+
             finalDamage += GetBonusSodaDamage();
 
-            if(playerInventory.HasItemByName("OP Turret"))
+            if (playerInventory.HasItemByName("OP Turret"))
             {
                 finalDamage *= 2;
             }
 
+            if (puteyAngryDoubleDamage)
+            {
+                finalDamage *= 2f;
+            }
+
             ApplyDamage(hit, finalDamage, criticalHits);
-            if (!isActiveAndEnabled)
+            if (!isActiveAndEnabled || empDisabled)
             {
                 currentAmmo = Mathf.Max(0, currentAmmo - 1);
                 return;
@@ -629,10 +823,11 @@ public class TurretGun : MonoBehaviour
 
         if (fireSound != null)
         {
-            AudioManager.Play3D(
-                fireSound,
-                shotOrigin,
-                fireSoundVolume, 1, 1, 50);
+            audioSource.PlayOneShot(fireSound);
+            //AudioManager.Play3D(
+            //    fireSound,
+            //    shotOrigin,
+            //    fireSoundVolume, 1, 1, 50);
         }
 
         currentAmmo = Mathf.Max(0, currentAmmo - 1);
@@ -644,7 +839,7 @@ public class TurretGun : MonoBehaviour
         }
 
         nextShotTime =
-            Time.time + (1f / Mathf.Max(0.01f, fireRate));
+            Time.time + (1f / Mathf.Max(0.01f, EffectiveFireRate));
     }
 
 
@@ -807,7 +1002,7 @@ public class TurretGun : MonoBehaviour
 
     private void BeginReload()
     {
-        if (!isActiveAndEnabled || isReloading || currentAmmo >= magazineSize)
+        if (!isActiveAndEnabled || empDisabled || isReloading || currentAmmo >= magazineSize)
             return;
 
         isReloading = true;
@@ -818,6 +1013,7 @@ public class TurretGun : MonoBehaviour
 
         float totalReloadTime =
             Mathf.Max(0.01f, reloadTime);
+        reloadBaseDuration = totalReloadTime;
 
         float poseTime = Mathf.Min(
             Mathf.Max(0.01f, reloadPoseTransitionTime),
@@ -846,6 +1042,7 @@ public class TurretGun : MonoBehaviour
         }
 
         reloadSequence.AppendInterval(holdTime);
+        reloadSequence.timeScale = reloadBaseDuration / EffectiveReloadTime;
 
         reloadSequence.OnComplete(() =>
         {
@@ -874,11 +1071,15 @@ public class TurretGun : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.yellow;
+        if (carStats == null)
+            return;
 
-        Gizmos.DrawWireSphere(
-            transform.position,
-            detectionRange);
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, detectionRange);
+
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position,
+            detectionRange * MarkedTargetRangeMultiplier);
     }
 
     private int RollCriticalHits()

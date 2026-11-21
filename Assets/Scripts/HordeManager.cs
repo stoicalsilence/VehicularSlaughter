@@ -20,6 +20,37 @@ public sealed class HordeManager : MonoBehaviour
     public PlayerLevelSystem playerLevelSystem;
     public PlayerLevelRewardSystem playerLevelRewardSystem;
 
+    [Header("Elite Variant")]
+    [SerializeField, Range(0f, 1f)] private float eliteSpawnChance = 0.03f;
+    [SerializeField, Min(1f)] private float eliteScale = 1.45f;
+    [SerializeField, Min(1f)] private float eliteHealthMultiplier = 2.5f;
+    [SerializeField, Min(1f)] private float eliteSpeedMultiplier = 1.25f;
+    [SerializeField, Min(1f)] private float eliteDamageMultiplier = 1.75f;
+    [SerializeField, Range(0f, 1f)] private float eliteCrateDropChance = 0.12f;
+    [Tooltip("Optional override; otherwise uses the existing normal crate prefab.")]
+    [SerializeField] private GameObject eliteCratePrefab;
+    [SerializeField, Min(0f)] private float eliteCrateGroundOffset = 0.25f;
+
+    [Header("EMP Variant")]
+    [Tooltip("Persistent radio-controlled car. Assign explicitly; resolved once at Start if empty.")]
+    [SerializeField] private CarController empTargetCar;
+    [SerializeField, Range(0f, 1f)] private float empSpawnChance = 0.02f;
+    [SerializeField, Min(0f)] private float empStartSeconds = 90f;
+    [SerializeField, Min(0)] private int maxActiveEMP = 2;
+    [SerializeField, Min(0f)] private float empSpawnCooldown = 10f;
+    [SerializeField, Min(1f)] private float empSpeedMultiplier = 2.5f;
+    [SerializeField, Min(0.01f)] private float empHealthMultiplier = 0.7f;
+    [SerializeField, Min(0f)] private float empMinDistanceFromCar = 15f;
+    [SerializeField, Min(0f)] private float empMaxDistanceFromCar = 55f;
+    [Tooltip("Avoid spawning saboteurs at the car when the player is far away.")]
+    [SerializeField, Min(0f)] private float empMaxPlayerDistanceFromCar = 45f;
+    [SerializeField] private ParticleSystem empImpactParticlesPrefab;
+    [Tooltip("Lifetime must cover all particle children (including start delays).")]
+    [SerializeField, Min(0.1f)] private float empImpactEffectLifetime = 3f;
+    private int activeEMPCount;
+    private float nextEMPSpawnSeconds;
+    public int ActiveEMPCount => activeEMPCount;
+
     [Header("Enemy Pool")]
     [SerializeField] private int prewarmCount = 100;
     [SerializeField] private int maxPoolSize = 512;
@@ -134,6 +165,8 @@ public sealed class HordeManager : MonoBehaviour
     [SerializeField] private Color fountainColor = new Color(0.3f, 0.95f, 1f);
     [SerializeField] private AudioClip swarmWarningSound;
     [SerializeField] private AudioClip fountainSpawnSound;
+    [SerializeField] private AudioClip empExplosionSound;
+    [SerializeField] private AudioClip eliteDropCrateSound;
 
     public bool IsRunning { get; private set; }
     public float ElapsedSeconds { get; private set; }
@@ -331,6 +364,8 @@ public sealed class HordeManager : MonoBehaviour
             ? player.position
             : Vector3.zero;
 
+        bool hasCar = empTargetCar != null && empTargetCar.gameObject.activeInHierarchy;
+        Vector3 carPosition = hasCar ? empTargetCar.transform.position : Vector3.zero;
         float nearSqr = nearDistance * nearDistance;
         float mediumSqr = mediumDistance * mediumDistance;
 
@@ -346,11 +381,15 @@ public sealed class HordeManager : MonoBehaviour
 
             enemy.ManagedAnimationTick(elapsed);
 
-            if (!hasPlayer)
+            // EMPs chase the actual car, even when nobody is driving it.
+            if (enemy.IsEMP && !hasCar)
+            {
+                DespawnEnemy(enemy);
                 continue;
-
-            float distanceSqr =
-                (enemy.transform.position - playerPosition).sqrMagnitude;
+            }
+            if (!enemy.IsEMP && !hasPlayer) continue;
+            Vector3 targetPosition = enemy.IsEMP ? carPosition : playerPosition;
+            float distanceSqr = (enemy.transform.position - targetPosition).sqrMagnitude;
 
             float updateInterval;
 
@@ -364,7 +403,7 @@ public sealed class HordeManager : MonoBehaviour
             enemy.ManagedTick(
                 elapsed,
                 updateInterval,
-                playerPosition
+                targetPosition
             );
         }
     }
@@ -382,6 +421,7 @@ public sealed class HordeManager : MonoBehaviour
 
         enemyIndices.Add(enemy, activeEnemies.Count);
         activeEnemies.Add(enemy);
+        if (enemy.IsEMP) activeEMPCount++;
     }
 
     // Called automatically by HordeEnemy.OnDisable().
@@ -402,6 +442,8 @@ public sealed class HordeManager : MonoBehaviour
 
         HordeEnemy removed = activeEnemies[index];
         HordeEnemy last = activeEnemies[lastIndex];
+        if (!object.ReferenceEquals(removed, null) && removed.IsEMP)
+            activeEMPCount = Mathf.Max(0, activeEMPCount - 1);
 
         activeEnemies[index] = last;
         activeEnemies.RemoveAt(lastIndex);
@@ -515,15 +557,106 @@ public sealed class HordeManager : MonoBehaviour
         enemy.deathParticlePool = deathParticlePool;
 
         enemy.playerInventory = playerInventory;
-        enemy.ResetForSpawn(
-            EnemyHealthMultiplier,
-            EnemySpeedMultiplier,
-            EnemyDamageMultiplier
-        );
+        HordeEnemyVariant variant = RollVariant(enemy, position);
+        float health = EnemyHealthMultiplier;
+        float speed = EnemySpeedMultiplier;
+        float damage = EnemyDamageMultiplier;
+        float scale = 1f;
+        float motion = 1f;
+        if (variant == HordeEnemyVariant.Elite)
+        {
+            health *= Mathf.Max(1f, eliteHealthMultiplier);
+            motion = Mathf.Max(1f, eliteSpeedMultiplier);
+            speed *= motion;
+            damage *= Mathf.Max(1f, eliteDamageMultiplier);
+            scale = Mathf.Max(1f, eliteScale);
+        }
+        else if (variant == HordeEnemyVariant.EMP)
+        {
+            health *= Mathf.Max(0.01f, empHealthMultiplier);
+            motion = Mathf.Max(1f, empSpeedMultiplier);
+            speed *= motion;
+            damage = 0f;
+            nextEMPSpawnSeconds = ElapsedSeconds + Mathf.Max(0f, empSpawnCooldown);
+        }
+        enemy.ResetForSpawn(health, speed, damage, variant, scale, motion);
 
         enemy.gameObject.SetActive(true);
 
         return enemy;
+    }
+
+    private static bool RollChance(float chance)
+    {
+        return chance >= 1f || (chance > 0f && Random.value < chance);
+    }
+
+    private HordeEnemyVariant RollVariant(HordeEnemy enemy, Vector3 spawnPosition)
+    {
+        if (enemy.CanBeEMP && CanSpawnEMP(spawnPosition) && RollChance(empSpawnChance))
+            return HordeEnemyVariant.EMP;
+        if (enemy.CanBeElite && RollChance(eliteSpawnChance))
+            return HordeEnemyVariant.Elite;
+        return HordeEnemyVariant.Normal;
+    }
+
+    private bool CanSpawnEMP(Vector3 spawnPosition)
+    {
+        if (empTargetCar == null || !empTargetCar.isActiveAndEnabled ||
+            empTargetCar.IsVehicleWrecked || empTargetCar.IsEmpDisabled || player == null ||
+            ElapsedSeconds < Mathf.Max(0f, empStartSeconds) || ElapsedSeconds < nextEMPSpawnSeconds ||
+            activeEMPCount >= Mathf.Max(0, maxActiveEMP)) return false;
+
+        Vector3 carPosition = empTargetCar.transform.position;
+        float playerLimit = Mathf.Max(0f, empMaxPlayerDistanceFromCar);
+        if ((player.position - carPosition).sqrMagnitude > playerLimit * playerLimit) return false;
+        float min = Mathf.Max(0f, empMinDistanceFromCar);
+        float max = Mathf.Max(min, empMaxDistanceFromCar);
+        float distanceSqr = (spawnPosition - carPosition).sqrMagnitude;
+        return distanceSqr >= min * min && distanceSqr <= max * max;
+    }
+
+    internal void PlayEMPImpact(Vector3 position)
+    {
+        // Play EMP sound independently of particles.
+        if (empExplosionSound != null)
+        {
+            AudioManager.Play3D(
+                empExplosionSound,
+                position,
+                1
+            );
+        }
+
+        // Spawn EMP explosion particles.
+        if (empImpactParticlesPrefab == null)
+            return;
+
+        ParticleSystem effect = Instantiate(
+            empImpactParticlesPrefab,
+            position,
+            Quaternion.identity
+        );
+
+        effect.Play(true);
+
+        Destroy(
+            effect.gameObject,
+            Mathf.Max(0.1f, empImpactEffectLifetime)
+        );
+    }
+
+    internal void TryDropEliteCrate(Vector3 position)
+    {
+        GameObject prefab = eliteCratePrefab != null ? eliteCratePrefab : cratePrefab;
+        if (prefab == null || !RollChance(eliteCrateDropChance)) return;
+        // A climbing enemy may die well above the ground. Drop at a walkable surface.
+        float height = Mathf.Max(1f, raycastHeight);
+        if (!Physics.Raycast(position + Vector3.up * 0.5f, Vector3.down,
+            out RaycastHit hit, height, groundLayer, QueryTriggerInteraction.Ignore)) return;
+        if (terrainGenerator != null && !terrainGenerator.IsInsidePlayableArea(hit.point)) return;
+        Instantiate(prefab, hit.point + Vector3.up * eliteCrateGroundOffset, Quaternion.identity);
+        AudioManager.Play3D(eliteDropCrateSound, position, 1, 1, 1, 50);
     }
 
     public void DespawnEnemy(HordeEnemy enemy)
@@ -602,6 +735,15 @@ public sealed class HordeManager : MonoBehaviour
     private void Start()
     {
         if (Instance != this) return;
+        if (empTargetCar == null && player != null)
+        {
+            PlayerRadio radio = player.GetComponentInChildren<PlayerRadio>(true);
+            if (radio == null) radio = player.GetComponentInParent<PlayerRadio>();
+            if (radio != null) empTargetCar = radio.carController;
+        }
+        if (empTargetCar == null) empTargetCar = FindObjectOfType<CarController>();
+        if (enemyPrefab != null && enemyPrefab.CanBeEMP && empTargetCar == null)
+            Debug.LogWarning("HordeManager: No car assigned for EMP enemies.", this);
         if (startAutomatically) BeginRun();
         else RefreshHUD(0f, 0f);
 
@@ -758,7 +900,7 @@ public sealed class HordeManager : MonoBehaviour
                 ActiveFountain = terrainGenerator.SpawnRuntimePOI(xpFountainPrefab, anchor.position, fountainMinDistance, fountainMaxDistance);
                 XPFountain xpFountainScript = ActiveFountain.GetComponent<XPFountain>();
                 xpFountainScript.levelSystem = playerLevelSystem;
-                xpFountainScript.rewardSystem= playerLevelRewardSystem;
+                xpFountainScript.rewardSystem = playerLevelRewardSystem;
                 xpFountainScript.SpawnIn();
                 if (ActiveFountain != null)
                 {
@@ -906,11 +1048,11 @@ public sealed class HordeManager : MonoBehaviour
             terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
             terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
 
-            for(int i = 0; i < 10; i++)
+            for (int i = 0; i < 10; i++)
             {
                 int r = Random.Range(0, 100);
 
-                if(r < (playerStats.itemLuck))
+                if (r < (playerStats.itemLuck))
                 {
                     terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
                 }

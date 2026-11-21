@@ -2,10 +2,40 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum HordeEnemyVariant { Normal, Elite, EMP }
+
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(CapsuleCollider))]
 public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 {
+    [Header("Variants")]
+    [SerializeField] private bool allowEliteVariant = true;
+    [SerializeField] private bool allowEmpVariant;
+    [Tooltip("Shared, solid-blue material. Must support this enemy's baked animation shader if used.")]
+    [SerializeField] private Material empBlueMaterial;
+
+    public HordeEnemyVariant Variant { get; private set; }
+    public bool IsElite => Variant == HordeEnemyVariant.Elite;
+    public bool IsEMP => Variant == HordeEnemyVariant.EMP;
+    public bool CanBeElite => allowEliteVariant;
+    public bool CanBeEMP => allowEmpVariant && empBlueMaterial != null;
+
+    private Vector3 baseLocalScale;
+    private CollisionDetectionMode baseCollisionMode;
+    private bool empVisualApplied;
+    private sealed class VariantRendererState
+    {
+        public Renderer renderer;
+        public Material[] normalMaterials;
+        public Material[] empMaterials;
+        public Material[] flashMaterials;
+    }
+    private readonly List<VariantRendererState> variantRenderers = new List<VariantRendererState>();
+
+    private float EffectiveStopDistance => IsEMP ? 0f : stopDistance;
+    private float VariantMotionMultiplier => IsEMP || IsElite ? Mathf.Max(1f, variantSpeedMultiplier) : 1f;
+    private float variantSpeedMultiplier = 1f;
+
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 4.5f;
     [SerializeField] private float acceleration = 18f;
@@ -79,32 +109,23 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public float MaxHealth => Mathf.Max(1f, maxHealth * HealthMultiplier);
     public bool IsDead => isDead;
 
+    // Only a turret that explicitly marks this enemy subscribes.
+    // Clear that mark before this pooled instance can be reused.
+    public event System.Action<HordeEnemy> TurretTargetInvalidated;
+
 
     [Header("Hit Feedback")]
     [SerializeField]
     private float hitFlashDuration = 0.08f;
 
-    // Shader properties for URP and Built-in Standard shaders.
-    private static readonly int BaseColorId =
-        Shader.PropertyToID("_BaseColor");
+    [Tooltip("Shared solid-white material, preferably Unlit with no texture.")]
+    [SerializeField] private Material hitFlashMaterial;
 
-    private static readonly int ColorId =
-        Shader.PropertyToID("_Color");
+    [Tooltip("Allow blue EMP enemies to briefly flash white when hit.")]
+    [SerializeField] private bool flashEMPEnemies = true;
 
     private Coroutine hitFlashRoutine;
-
-    private class RendererFlashState
-    {
-        public Renderer renderer;
-        public MaterialPropertyBlock originalBlock;
-        public MaterialPropertyBlock flashBlock;
-
-        public bool hasBaseColor;
-        public bool hasColor;
-    }
-
-    private readonly List<RendererFlashState> flashRenderers =
-        new List<RendererFlashState>();
+    private float hitFlashEndsAt;
 
 
     [Header("Death")]
@@ -176,7 +197,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public float BaseContactDamage => baseContactDamage;
 
     public float VehicleImpactCarDamageMultiplier =>
-        vehicleImpactCarDamageMultiplier * DamageMultiplier;
+        IsEMP ? 0f : vehicleImpactCarDamageMultiplier * DamageMultiplier;
 
     private void Awake()
     {
@@ -184,10 +205,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         capsule = GetComponent<CapsuleCollider>();
 
         defaultGravity = rb.useGravity;
+        baseLocalScale = transform.localScale;
+        baseCollisionMode = rb.collisionDetectionMode;
+        CacheVariantRenderers();
 
         baseContactDamage = contactDamage;
         currentHealth = MaxHealth;
-        CacheFlashRenderers();
 
         if (bakedAnimator == null)
             bakedAnimator = GetComponentInChildren<HordeBakedAnimator>(true);
@@ -221,6 +244,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private void OnDisable()
     {
+        TurretTargetInvalidated?.Invoke(this);
+
         if (HordeManager.Instance != null)
             HordeManager.Instance.UnregisterEnemy(this);
 
@@ -285,7 +310,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         // Look for a wall in front of us.
         if (horizontalDirection.sqrMagnitude >
-            stopDistance * stopDistance)
+            EffectiveStopDistance * EffectiveStopDistance)
         {
             if (TryStartClimbing(horizontalDirection))
             {
@@ -328,14 +353,14 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Vector3 desiredVelocity = Vector3.zero;
 
         if (directionToPlayer.sqrMagnitude >
-            stopDistance * stopDistance)
+            EffectiveStopDistance * EffectiveStopDistance)
         {
             desiredVelocity =
                 directionToPlayer.normalized * MoveSpeed;
         }
 
         // Prevent all enemies from occupying one position.
-        desiredVelocity += CalculateSeparation();
+        desiredVelocity += CalculateSeparation() * (IsEMP ? 0.25f : 1f);
 
         desiredVelocity = Vector3.ClampMagnitude(
             desiredVelocity,
@@ -353,7 +378,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Vector3 nextHorizontal = Vector3.MoveTowards(
             currentHorizontal,
             desiredVelocity,
-            acceleration * dt
+            acceleration * VariantMotionMultiplier * dt
         );
 
         currentVelocity.x = nextHorizontal.x;
@@ -530,7 +555,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Velocity = Vector3.MoveTowards(
             Velocity,
             desiredVelocity,
-            climbAcceleration * dt
+            climbAcceleration * VariantMotionMultiplier * dt
         );
 
         FaceDirection(climbDirection, dt);
@@ -572,7 +597,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Quaternion nextRotation = Quaternion.RotateTowards(
             rb.rotation,
             targetRotation,
-            turnSpeed * dt
+            turnSpeed * VariantMotionMultiplier * dt
         );
 
         rb.MoveRotation(nextRotation);
@@ -606,6 +631,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     public void PrepareForPool()
     {
+        TurretTargetInvalidated?.Invoke(this);
         StopHitFlash(true);
         ResetMovementState();
     }
@@ -618,7 +644,23 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     // Called while pooled/inactive, after Awake and before OnEnable.
     public void ResetForSpawn(float healthMultiplier, float speedMultiplier, float damageMultiplier)
     {
+        ResetForSpawn(healthMultiplier, speedMultiplier, damageMultiplier,
+            HordeEnemyVariant.Normal, 1f, 1f);
+    }
+
+    // Variant multipliers have already been combined with run difficulty by the manager.
+    internal void ResetForSpawn(float healthMultiplier, float speedMultiplier, float damageMultiplier,
+        HordeEnemyVariant variant, float scaleMultiplier, float motionMultiplier)
+    {
+        TurretTargetInvalidated?.Invoke(this);
         StopHitFlash(true);
+
+        Variant = variant;
+        variantSpeedMultiplier = Mathf.Max(1f, motionMultiplier);
+        transform.localScale = baseLocalScale * Mathf.Max(0.1f, scaleMultiplier);
+        SetEmpVisuals(IsEMP);
+        if (rb != null)
+            rb.collisionDetectionMode = IsEMP ? CollisionDetectionMode.ContinuousDynamic : baseCollisionMode;
 
         HealthMultiplier = SanitizeMultiplier(healthMultiplier);
         SpeedMultiplier = SanitizeMultiplier(speedMultiplier);
@@ -665,7 +707,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Vector3 impactPosition,
         float knockbackForce)
     {
-        if (isDead || Time.time < nextVehicleHitTime)
+        if (isDead || IsEMP || Time.time < nextVehicleHitTime)
             return false;
 
         nextVehicleHitTime = Time.time + Mathf.Max(0.05f, vehicleHitCooldown);
@@ -779,128 +821,126 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             hitSoundVolume,
             1,
             1,
-            50
+            50, 192
         );
-    }
-
-
-    // Cache all renderers, including SkinnedMeshRenderers
-    // and renderers on child GameObjects.
-    private void CacheFlashRenderers()
-    {
-        flashRenderers.Clear();
-
-        Renderer[] renderers =
-            GetComponentsInChildren<Renderer>(true);
-
-        foreach (Renderer renderer in renderers)
-        {
-            bool hasBaseColor = false;
-            bool hasColor = false;
-
-            foreach (Material material in renderer.sharedMaterials)
-            {
-                if (material == null)
-                    continue;
-
-                if (material.HasProperty(BaseColorId))
-                    hasBaseColor = true;
-
-                if (material.HasProperty(ColorId))
-                    hasColor = true;
-            }
-
-            if (!hasBaseColor && !hasColor)
-                continue;
-
-            flashRenderers.Add(new RendererFlashState
-            {
-                renderer = renderer,
-                originalBlock = new MaterialPropertyBlock(),
-                flashBlock = new MaterialPropertyBlock(),
-                hasBaseColor = hasBaseColor,
-                hasColor = hasColor
-            });
-        }
     }
 
 
     private void PlayHitFlash()
     {
-        if (hitFlashDuration <= 0f)
+        if (hitFlashMaterial == null || hitFlashDuration <= 0f ||
+            (IsEMP && !flashEMPEnemies) || !isActiveAndEnabled ||
+            variantRenderers.Count == 0)
             return;
 
-        bool alreadyFlashing = hitFlashRoutine != null;
-
+        // Consecutive hits extend the current flash without swapping again.
+        hitFlashEndsAt = Time.time + hitFlashDuration;
         if (hitFlashRoutine != null)
+            return;
+
+        foreach (VariantRendererState state in variantRenderers)
         {
-            StopCoroutine(hitFlashRoutine);
-            hitFlashRoutine = null;
-        }
-
-        foreach (RendererFlashState state in flashRenderers)
-        {
-            if (state.renderer == null)
-                continue;
-
-            // Only capture the original state on the first hit.
-            if (!alreadyFlashing)
-            {
-                state.renderer.GetPropertyBlock(
-                    state.originalBlock);
-            }
-
-            state.renderer.GetPropertyBlock(
-                state.flashBlock);
-
-            if (state.hasBaseColor)
-                state.flashBlock.SetColor(BaseColorId, Color.white);
-
-            if (state.hasColor)
-                state.flashBlock.SetColor(ColorId, Color.white);
-
-            state.renderer.SetPropertyBlock(
-                state.flashBlock);
+            if (state.renderer != null && state.flashMaterials != null)
+                state.renderer.sharedMaterials = state.flashMaterials;
         }
 
         hitFlashRoutine = StartCoroutine(HitFlashRoutine());
     }
 
-
     private IEnumerator HitFlashRoutine()
     {
-        yield return new WaitForSeconds(hitFlashDuration);
+        // No new WaitForSeconds allocation or coroutine restart on repeated hits.
+        while (Time.time < hitFlashEndsAt)
+            yield return null;
 
         RestoreOriginalMaterials();
-
         hitFlashRoutine = null;
     }
 
-
     private void RestoreOriginalMaterials()
     {
-        foreach (RendererFlashState state in flashRenderers)
+        foreach (VariantRendererState state in variantRenderers)
         {
             if (state.renderer == null)
                 continue;
 
-            state.renderer.SetPropertyBlock(
-                state.originalBlock);
+            state.renderer.sharedMaterials = empVisualApplied && state.empMaterials != null
+                ? state.empMaterials : state.normalMaterials;
         }
     }
 
-
     private void StopHitFlash(bool restoreMaterials)
     {
-        bool wasFlashing = hitFlashRoutine != null;
-        if (wasFlashing)
-        {
-            StopCoroutine(hitFlashRoutine);
-            hitFlashRoutine = null;
-        }
+        if (hitFlashRoutine == null)
+            return;
 
-        if (restoreMaterials && wasFlashing)
+        StopCoroutine(hitFlashRoutine);
+        hitFlashRoutine = null;
+        hitFlashEndsAt = 0f;
+
+        if (restoreMaterials)
             RestoreOriginalMaterials();
+    }
+
+    // All visual states share a single cache, including inactive baked frames.
+    // Arrays are allocated once per pooled enemy, never on damage.
+    private void CacheVariantRenderers()
+    {
+        if (!CanBeEMP && hitFlashMaterial == null)
+            return;
+
+        foreach (Renderer renderer in GetComponentsInChildren<Renderer>(true))
+        {
+            if (!(renderer is MeshRenderer) && !(renderer is SkinnedMeshRenderer))
+                continue;
+
+            Material[] normal = renderer.sharedMaterials;
+            if (normal.Length == 0)
+                continue;
+
+            Material[] blue = CanBeEMP ? new Material[normal.Length] : null;
+            Material[] white = hitFlashMaterial != null ? new Material[normal.Length] : null;
+
+            for (int i = 0; i < normal.Length; i++)
+            {
+                if (blue != null) blue[i] = empBlueMaterial;
+                if (white != null) white[i] = hitFlashMaterial;
+            }
+
+            variantRenderers.Add(new VariantRendererState
+            {
+                renderer = renderer,
+                normalMaterials = normal,
+                empMaterials = blue,
+                flashMaterials = white
+            });
+        }
+    }
+
+    private void SetEmpVisuals(bool useEmpMaterials)
+    {
+        if (empVisualApplied == useEmpMaterials)
+            return;
+
+        empVisualApplied = useEmpMaterials;
+        if (hitFlashRoutine == null)
+            RestoreOriginalMaterials();
+    }
+
+    // Called by CarController before any normal run-over or contact damage.
+    // No XP, kill credit or crate for a successful suicide attack.
+    internal bool DetonateEMP(CarController car, Vector3 impactPoint)
+    {
+        if (!IsEMP || isDead || !isActiveAndEnabled || car == null) return false;
+        isDead = true; // Guard duplicate collision callbacks BEFORE invoking other systems.
+        currentHealth = 0f;
+        StopHitFlash(true);
+        HordeManager manager = HordeManager.Instance;
+        if (manager != null) manager.PlayEMPImpact(impactPoint);
+        car.TakeEMPBatteryHit();
+        if (manager != null) manager.DespawnEnemy(this);
+        else Destroy(gameObject);
+        return true;
     }
 
 
@@ -910,39 +950,57 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             return;
 
         isDead = true;
+        TurretTargetInvalidated?.Invoke(this);
 
         StopHitFlash(true);
 
-        if (playerInventory != null) playerInventory.ReportKill(gameObject);
+        if (playerInventory != null)
+            playerInventory.ReportKill(gameObject);
 
-        // Spawn pooled death particles.
-        if (deathParticlePool != null)
+        HordeManager manager = HordeManager.Instance;
+
+        Vector3 deathPosition = transform.position;
+
+        if (IsEMP && manager != null)
         {
-            deathParticlePool.Play(transform.position);
+            // EMP-specific explosion particles and sound.
+            manager.PlayEMPImpact(deathPosition);
         }
-
-        // Play 3D death audio.
-        if (deathSound != null)
+        else
         {
-            AudioManager.Play3D(
-                deathSound,
-                transform.position,
-                deathSoundVolume
-            );
+            // Regular pooled death particles.
+            if (deathParticlePool != null)
+            {
+                deathParticlePool.Play(deathPosition);
+            }
+
+            // Regular death sound.
+            if (deathSound != null)
+            {
+                AudioManager.Play3D(
+                    deathSound,
+                    deathPosition,
+                    deathSoundVolume
+                );
+            }
         }
 
         DropXP();
 
-        // Return the enemy to the HordeManager pool.
-        if (HordeManager.Instance != null)
+        if (IsElite && manager != null)
+            manager.TryDropEliteCrate(deathPosition);
+
+        // Return enemy to the pool.
+        if (manager != null)
         {
-            HordeManager.Instance.DespawnEnemy(this);
+            manager.DespawnEnemy(this);
         }
         else
         {
             Destroy(gameObject);
         }
     }
+
 
     private void DropXP()
     {

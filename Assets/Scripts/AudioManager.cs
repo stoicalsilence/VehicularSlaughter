@@ -2,15 +2,21 @@ using UnityEngine;
 
 public class AudioManager : MonoBehaviour
 {
-    public static void Play2D(AudioClip clip, float volume = 1f, float pitch = 1f)
+    public static void Play2D(
+        AudioClip clip,
+        float volume = 1f,
+        float pitch = 1f,
+        int priority = 128)
     {
         GameObject tempGO = new GameObject("TempAudio2D");
         AudioSource audioSource = tempGO.AddComponent<AudioSource>();
 
         audioSource.clip = clip;
-        audioSource.volume = volume;     
-        audioSource.spatialBlend = 0f;  
-        audioSource.pitch = pitch;  
+        audioSource.volume = volume;
+        audioSource.spatialBlend = 0f;
+        audioSource.pitch = pitch;
+        audioSource.priority = Mathf.Clamp(priority, 0, 256);
+
         audioSource.Play();
 
         Object.Destroy(tempGO, clip.length);
@@ -22,7 +28,8 @@ public class AudioManager : MonoBehaviour
         float volume = 1f,
         float pitch = 1f,
         float minDistance = 1f,
-        float maxDistance = 20f)
+        float maxDistance = 20f,
+        int priority = 128)
     {
         GameObject tempGO = new GameObject("TempAudio3D");
         tempGO.transform.position = position;
@@ -32,6 +39,7 @@ public class AudioManager : MonoBehaviour
         audioSource.clip = clip;
         audioSource.volume = volume;
         audioSource.pitch = pitch;
+        audioSource.priority = Mathf.Clamp(priority, 0, 256);
 
         audioSource.spatialBlend = 1f;
 

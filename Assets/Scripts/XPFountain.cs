@@ -79,7 +79,7 @@ public sealed class XPFountain : MonoBehaviour
     {
         AudioManager.Play3D(enterSound, transform.position, 1, 1, 1, 100);
         anim.Play(leaveAnim.name);
-        Invoke(nameof(PlayGrabSound), 1.1f);
+        Invoke(nameof(PlayGrabSound), 4.1f);
         Destroy(this.gameObject, 2.45f);
     }
 

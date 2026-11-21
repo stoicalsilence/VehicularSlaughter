@@ -671,7 +671,7 @@ namespace Q3Movement
             if (hit.gameObject.TryGetComponent<ItemCrate>(out ItemCrate crate))
             {
                 playerInventory.TryOpenCrate(crate);
-            } 
+            }
             else
             if (hit.gameObject.TryGetComponent<StatTradePickup>(out StatTradePickup corruptedCrate))
             {

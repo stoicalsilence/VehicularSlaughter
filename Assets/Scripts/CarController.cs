@@ -96,6 +96,7 @@ public class CarController : MonoBehaviour
     //The following variable lets you to set up a UI text to display the speed of your car.
     public bool useUI = false;
     public Text carSpeedText; // Used to store the UI object that is going to show the speed of the car.
+    public GameObject parkBrakeIcon;
 
     //SOUNDS
 
@@ -202,6 +203,24 @@ public class CarController : MonoBehaviour
     [SerializeField, Min(0f)] private float ejectionHorizontalSpeed = 12f;
     [SerializeField, Min(0f)] private float ejectionVerticalSpeed = 10f;
 
+    [Header("EMP / Battery")]
+    [SerializeField, Min(0.1f)] private float empDisableDuration = 15f;
+    [Tooltip("Dedicated looping blue electrical sparks on the car; not the wreck fire.")]
+    [SerializeField] private ParticleSystem empDisabledParticles;
+    [Tooltip("Optional HUD text: battery health or countdown. Leave unassigned if unused.")]
+    [SerializeField] private TextMeshProUGUI batteryStatusText;
+    private const int MaxBatteryHP = 2;
+    private int batteryHP = MaxBatteryHP;
+    private float empDisabledUntil;
+    public int BatteryHP => batteryHP;
+    public int MaxBatteryHealth => MaxBatteryHP;
+    public bool IsEmpDisabled => empDisabledUntil > 0f;
+    public float EmpSecondsRemaining => IsEmpDisabled ? Mathf.Max(0f, empDisabledUntil - Time.time) : 0f;
+    public event Action<int, int> BatteryHealthChanged;
+    private int lastBatteryDisplayHP = -1;
+    private int lastBatteryDisplaySeconds = -1;
+    private bool lastBatteryDisplayWrecked;
+
     private bool turretWasEnabled;
     private bool collectorWasEnabled;
 
@@ -236,6 +255,7 @@ public class CarController : MonoBehaviour
     private const float EnemyContactForgetDelay = 0.25f;
 
     public bool IsVehicleWrecked => vehicleWrecked;
+    public TurretGun VehicleTurret => vehicleTurret;
 
     // Subscribe from a HUD or game manager if you want to display vehicle health.
     public event Action<float, float> VehicleHealthChanged;
@@ -287,7 +307,93 @@ public class CarController : MonoBehaviour
     [SerializeField, Tooltip("When false, keyboard/touch driving input is ignored. Vehicle physics and effects continue.")]
     private bool playerDrivingEnabled = true;
 
-    public bool PlayerDrivingEnabled => playerDrivingEnabled && !vehicleWrecked;
+    [Header("Parking Brake")]
+    [SerializeField] private KeyCode parkingBrakeKey = KeyCode.V;
+    [SerializeField, Min(1000f)] private float parkingBrakeTorque = 15000f;
+    [SerializeField, Min(0.01f)] private float parkingLockSpeed = 0.3f;
+    [SerializeField, Tooltip("Played when the parking brake is engaged or released.")]
+    private AudioClip parkingBrakeToggleSound;
+
+    private bool parkingBrakeEngaged;
+    private bool parkingPositionLocked;
+    private RigidbodyConstraints constraintsBeforeParking;
+    public bool IsParkingBrakeEngaged => parkingBrakeEngaged;
+
+    // Only an occupant of this specific car may engage or release its parking brake.
+    private bool HasPlayerInDriverSeat()
+    {
+        foreach (PlayerVehicleInteractor occupant in GetComponentsInChildren<PlayerVehicleInteractor>(true))
+        {
+            if (occupant.IsInVehicle && occupant.currentCarController == this)
+                return true;
+        }
+        return false;
+    }
+
+    public void SetParkingBrake(bool engaged)
+    {
+        if (!HasPlayerInDriverSeat() || parkingBrakeEngaged == engaged || vehicleWrecked) return;
+        parkingBrakeEngaged = engaged;
+        if (parkingBrakeToggleSound != null)
+            AudioManager.Play2D(parkingBrakeToggleSound, 1f);
+
+        if (engaged)
+        {
+            CancelInvoke(nameof(DecelerateCar));
+            deceleratingCar = false;
+            throttleAxis = 0f;
+            // Keep the normal drifting handbrake independent of parking.
+            ApplyParkingBrake();
+        }
+        else
+        {
+            UnlockParkingPosition();
+            if (!IsEmpDisabled) ReleaseBrakes();
+        }
+    }
+
+    private void UnlockParkingPosition()
+    {
+        if (!parkingPositionLocked || carRigidbody == null) return;
+        carRigidbody.constraints = constraintsBeforeParking;
+        parkingPositionLocked = false;
+        carRigidbody.WakeUp();
+    }
+
+    private void ApplyParkingBrake()
+    {
+        if (!parkingBrakeEngaged) return;
+        // A parking brake is not a drifting handbrake: lock wheel rotation without removing grip.
+        frontLeftCollider.motorTorque = frontRightCollider.motorTorque = 0f;
+        rearLeftCollider.motorTorque = rearRightCollider.motorTorque = 0f;
+        frontLeftCollider.brakeTorque = frontRightCollider.brakeTorque = parkingBrakeTorque;
+        rearLeftCollider.brakeTorque = rearRightCollider.brakeTorque = parkingBrakeTorque;
+    }
+
+    private void FixedUpdateParkingBrake()
+    {
+        if (!parkingBrakeEngaged || carRigidbody == null || vehicleWrecked) return;
+        ApplyParkingBrake();
+        if (parkingPositionLocked || carRigidbody.velocity.sqrMagnitude > parkingLockSpeed * parkingLockSpeed)
+            return;
+
+        // Never suspend a car in mid-air: at least two wheels must touch the ground.
+        WheelHit hit;
+        int grounded = 0;
+        if (frontLeftCollider.GetGroundHit(out hit)) grounded++;
+        if (frontRightCollider.GetGroundHit(out hit)) grounded++;
+        if (rearLeftCollider.GetGroundHit(out hit)) grounded++;
+        if (rearRightCollider.GetGroundHit(out hit)) grounded++;
+        if (grounded < 2) return;
+
+        constraintsBeforeParking = carRigidbody.constraints;
+        parkingPositionLocked = true;
+        carRigidbody.velocity = Vector3.zero;
+        carRigidbody.angularVelocity = Vector3.zero;
+        carRigidbody.constraints = RigidbodyConstraints.FreezeAll;
+    }
+
+    public bool PlayerDrivingEnabled => playerDrivingEnabled && !vehicleWrecked && !IsEmpDisabled;
     public void SetPlayerDrivingEnabled(bool value)
     {
         playerDrivingEnabled = value && !vehicleWrecked;
@@ -476,6 +582,7 @@ public class CarController : MonoBehaviour
         }
 
         HideLastDamageText();
+        ResetBattery();
     }
 
     // Handle enemy gameplay impacts separately from optional crash VFX/audio.
@@ -484,8 +591,11 @@ public class CarController : MonoBehaviour
         if (collision == null)
             return;
 
-        HandleEnemyImpact(collision);
-        HandleEnemyContactDamage(collision);
+        HordeEnemy enemy = collision.collider != null
+            ? collision.collider.GetComponentInParent<HordeEnemy>() : null;
+        if (HandleEMPContact(collision, enemy)) return;
+        HandleEnemyImpact(collision, enemy);
+        HandleEnemyContactDamage(collision, enemy);
 
         // Crash effects are cosmetic and must not control whether gameplay damage runs.
         if (!useCrashEffects)
@@ -553,19 +663,78 @@ public class CarController : MonoBehaviour
         if (collision == null)
             return;
 
-        HandleEnemyImpact(collision);
-        HandleEnemyContactDamage(collision);
+        HordeEnemy enemy = collision.collider != null
+            ? collision.collider.GetComponentInParent<HordeEnemy>() : null;
+        if (HandleEMPContact(collision, enemy)) return;
+        HandleEnemyImpact(collision, enemy);
+        HandleEnemyContactDamage(collision, enemy);
     }
 
 
-    private void HandleEnemyImpact(Collision collision)
+    // EMP contact has priority over run-over damage and thorns, regardless of speed.
+    private bool HandleEMPContact(Collision collision, HordeEnemy enemy)
+    {
+        if (enemy == null || !enemy.IsEMP) return false;
+        Vector3 point = collision.contactCount > 0 ? collision.GetContact(0).point : enemy.transform.position;
+        enemy.DetonateEMP(this, point);
+        // Also swallow stale callbacks from the same enemy after it has detonated.
+        return true;
+    }
+
+    /// <summary>One battery point per EMP. No hull damage and no stacked shutdowns.</summary>
+    public bool TakeEMPBatteryHit()
+    {
+        if (!vehicleHealthInitialized || vehicleWrecked || currentVehicleHealth <= 0f || IsEmpDisabled) return false;
+        batteryHP = Mathf.Max(0, batteryHP - 1);
+        if (batteryHP == 0)
+        {
+            empDisabledUntil = Time.time + Mathf.Max(0.1f, empDisableDuration);
+            // Preserve seat occupancy and playerDrivingEnabled. Reuse the existing
+            // wheel/audio shutdown without invoking wreck, explosion or ejection.
+            StopWreckDriving();
+            if (vehicleTurret != null) vehicleTurret.SetEmpDisabled(true);
+            if (empDisabledParticles != null) empDisabledParticles.Play(true);
+        }
+        BatteryHealthChanged?.Invoke(batteryHP, MaxBatteryHP);
+        RefreshBatteryHUD();
+        return true;
+    }
+
+    private void ClearEMPShutdown()
+    {
+        bool wasDisabled = IsEmpDisabled;
+        empDisabledUntil = 0f;
+        if (vehicleTurret != null) vehicleTurret.SetEmpDisabled(false);
+        if (empDisabledParticles != null)
+            empDisabledParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        if (wasDisabled && !vehicleWrecked) ReleaseBrakes();
+    }
+
+    private void ResetBattery()
+    {
+        ClearEMPShutdown();
+        batteryHP = MaxBatteryHP;
+        BatteryHealthChanged?.Invoke(batteryHP, MaxBatteryHP);
+        RefreshBatteryHUD();
+    }
+
+    private void RefreshBatteryHUD()
+    {
+        if (batteryStatusText == null) return;
+        int seconds = Mathf.CeilToInt(EmpSecondsRemaining);
+        if (lastBatteryDisplayHP == batteryHP && lastBatteryDisplaySeconds == seconds &&
+            lastBatteryDisplayWrecked == vehicleWrecked) return;
+        lastBatteryDisplayHP = batteryHP;
+        lastBatteryDisplaySeconds = seconds;
+        lastBatteryDisplayWrecked = vehicleWrecked;
+        batteryStatusText.text = vehicleWrecked ? "BATTERY OFFLINE" : IsEmpDisabled ?
+            $"EMP - {seconds}s" : $"{batteryHP}/{MaxBatteryHP}";
+    }
+
+    private void HandleEnemyImpact(Collision collision, HordeEnemy enemy)
     {
         if (!enableVehicleImpactSystem || vehicleWrecked || carRigidbody == null)
             return;
-
-        HordeEnemy enemy = collision.collider != null
-            ? collision.collider.GetComponentInParent<HordeEnemy>()
-            : null;
 
         if (enemy == null || enemy.IsDead)
             return;
@@ -581,11 +750,14 @@ public class CarController : MonoBehaviour
         float maximumSpeed = Mathf.Max(minimumSpeed + 0.01f, maximumImpactSpeedKmh);
         float impact01 = Mathf.InverseLerp(minimumSpeed, maximumSpeed, speedTowardEnemyKmh);
 
-        float enemyDamage = Mathf.Lerp(
+        float ramDamage = Mathf.Lerp(
             Mathf.Max(0f, minimumEnemyDamage),
             Mathf.Max(0f, maximumEnemyDamage),
             impact01
         );
+
+        // Add the car's thorns damage to every successful ram.
+        float enemyDamage = ramDamage + Mathf.Max(0f, vehicleThornsDamage);
 
         float enemyKnockback = Mathf.Lerp(
             Mathf.Max(0f, minimumEnemyKnockback),
@@ -622,7 +794,7 @@ public class CarController : MonoBehaviour
 
 
 
-    private void HandleEnemyContactDamage(Collision collision)
+    private void HandleEnemyContactDamage(Collision collision, HordeEnemy enemy)
     {
         if (!enableVehicleImpactSystem ||
             carRigidbody == null ||
@@ -632,9 +804,6 @@ public class CarController : MonoBehaviour
         {
             return;
         }
-
-        HordeEnemy enemy =
-            collision.collider.GetComponentInParent<HordeEnemy>();
 
         if (enemy == null || enemy.IsDead)
             return;
@@ -739,8 +908,11 @@ public class CarController : MonoBehaviour
     public void RespawnVehicle()
     {
         bool wasWrecked = vehicleWrecked;
+        UnlockParkingPosition();
+        parkingBrakeEngaged = false;
         currentVehicleHealth = maxVehicleHealth;
         vehicleWrecked = false;
+        ResetBattery();
         enemyContactStates.Clear();
         staleEnemyContacts.Clear();
         CancelInvoke(nameof(HideLastDamageText));
@@ -771,6 +943,8 @@ public class CarController : MonoBehaviour
 
         vehicleWrecked = true;
         currentVehicleHealth = 0f;
+        ClearEMPShutdown();
+        RefreshBatteryHUD();
         SetPlayerDrivingEnabled(false);
         enemyContactStates.Clear();
         staleEnemyContacts.Clear();
@@ -827,6 +1001,9 @@ public class CarController : MonoBehaviour
 
     private void StopWreckDriving()
     {
+        // A wreck or EMP can still apply its own braking without inheriting the parking lock.
+        UnlockParkingPosition();
+        parkingBrakeEngaged = false;
         CancelInvoke(nameof(DecelerateCar));
         CancelInvoke(nameof(RecoverTraction));
         deceleratingCar = false;
@@ -889,6 +1066,7 @@ public class CarController : MonoBehaviour
             velocityBeforePhysicsStep = carRigidbody.velocity;
 
         CleanupEnemyContactStates();
+        FixedUpdateParkingBrake();
     }
 
     // Update is called once per frame
@@ -926,12 +1104,30 @@ public class CarController : MonoBehaviour
             VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
         }
 
-        if (vehicleWrecked)
+        if (IsEmpDisabled && Time.time >= empDisabledUntil && !vehicleWrecked)
+            ResetBattery();
+        RefreshBatteryHUD();
+
+        // Toggle once per press, only while the player is actually driving.
+        if (playerDrivingEnabled && !vehicleWrecked && !IsEmpDisabled &&
+            Input.GetKeyDown(parkingBrakeKey) && HasPlayerInDriverSeat())
+            SetParkingBrake(!parkingBrakeEngaged);
+
+        if (vehicleWrecked || IsEmpDisabled)
         {
-            // Keep the wreck physically present and its wheel meshes synchronized.
+            // Keep the wreck/EMP car physically present and its wheel meshes synchronized.
             carSpeed = carRigidbody.velocity.magnitude * 3.6f;
             AnimateWheelMeshes();
             return;
+        }
+
+        if (parkingBrakeEngaged)
+        {
+            parkBrakeIcon.SetActive(true);
+        }
+        else
+        {
+            parkBrakeIcon.SetActive(false);
         }
 
         //CAR DATA
@@ -952,6 +1148,12 @@ public class CarController : MonoBehaviour
         bool handbrakeInput = playerDrivingEnabled &&
                               (useTouchInput ? handbrakePTI.buttonPressed : Input.GetKey(KeyCode.Space));
 
+        // Starting to drive automatically disengages the parking brake.
+        // The seat check prevents input from controlling an unoccupied car.
+        if (parkingBrakeEngaged && (forwardInput || reverseInput) &&
+            HasPlayerInDriverSeat())
+            SetParkingBrake(false);
+
         // Pressing the opposite direction while moving first applies the brakes in this controller.
         bool engineUnderThrottle = (forwardInput && localVelocityZ >= -1f) ||
                                    (reverseInput && localVelocityZ <= 1f);
@@ -963,6 +1165,21 @@ public class CarController : MonoBehaviour
         UpdateEngineSoundPitch(engineUnderThrottle);
         UpdateExhaustParticles(gasInput);
         SetBrakeLights(brakingInput);
+
+        // Parking overrides throttle, steering and deceleration while engaged.
+        // Keep wheel meshes and speed readout updating as the car slows down.
+        if (parkingBrakeEngaged)
+        {
+            CancelInvoke(nameof(DecelerateCar));
+            deceleratingCar = false;
+            ApplyParkingBrake();
+            UpdateEngineSoundPitch(false);
+            UpdateExhaustParticles(false);
+            SetBrakeLights(true);
+            if (isTractionLocked) RecoverTraction();
+            AnimateWheelMeshes();
+            return;
+        }
 
         //CAR PHYSICS
 
@@ -1185,7 +1402,7 @@ public class CarController : MonoBehaviour
     // Apart from that, the tireScreechSound will play whenever the car starts drifting or losing traction.
     public void CarSounds()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         if (useSounds)
         {
             if (carEngineSound != null && !carEngineSound.isPlaying)
@@ -1236,7 +1453,7 @@ public class CarController : MonoBehaviour
     //The following method turns the front car wheels to the left. The speed of this movement will depend on the steeringSpeed variable.
     public void TurnLeft()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         steeringAxis = steeringAxis - (Time.deltaTime * 10f * steeringSpeed);
         if (steeringAxis < -1f)
         {
@@ -1250,7 +1467,7 @@ public class CarController : MonoBehaviour
     //The following method turns the front car wheels to the right. The speed of this movement will depend on the steeringSpeed variable.
     public void TurnRight()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         steeringAxis = steeringAxis + (Time.deltaTime * 10f * steeringSpeed);
         if (steeringAxis > 1f)
         {
@@ -1265,7 +1482,7 @@ public class CarController : MonoBehaviour
     // on the steeringSpeed variable.
     public void ResetSteeringAngle()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         if (steeringAxis < 0f)
         {
             steeringAxis = steeringAxis + (Time.deltaTime * 10f * steeringSpeed);
@@ -1325,7 +1542,7 @@ public class CarController : MonoBehaviour
     // This method apply positive torque to the wheels in order to go forward.
     public void GoForward()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         //If the forces aplied to the rigidbody in the 'x' asis are greater than
         //3f, it means that the car is losing traction, then the car will start emitting particle systems.
         if (Mathf.Abs(localVelocityX) > 2.5f)
@@ -1381,7 +1598,7 @@ public class CarController : MonoBehaviour
     // This method apply negative torque to the wheels in order to go backwards.
     public void GoReverse()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         //If the forces aplied to the rigidbody in the 'x' asis are greater than
         //3f, it means that the car is losing traction, then the car will start emitting particle systems.
         if (Mathf.Abs(localVelocityX) > 2.5f)
@@ -1441,8 +1658,10 @@ public class CarController : MonoBehaviour
         frontRightCollider.motorTorque = 0f;
         rearLeftCollider.motorTorque = 0f;
         rearRightCollider.motorTorque = 0f;
-        if (vehicleWrecked)
+        if (vehicleWrecked || IsEmpDisabled)
             Brakes();
+        else if (parkingBrakeEngaged)
+            ApplyParkingBrake();
         else
             ReleaseBrakes();
     }
@@ -1450,6 +1669,7 @@ public class CarController : MonoBehaviour
     // Clears service-brake torque when the controller is no longer braking.
     void ReleaseBrakes()
     {
+        if (parkingBrakeEngaged) { ApplyParkingBrake(); return; }
         frontLeftCollider.brakeTorque = 0f;
         frontRightCollider.brakeTorque = 0f;
         rearLeftCollider.brakeTorque = 0f;
@@ -1461,7 +1681,7 @@ public class CarController : MonoBehaviour
     // usually every 0.1f when the user is not pressing W (throttle), S (reverse) or Space bar (handbrake).
     public void DecelerateCar()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled || parkingBrakeEngaged) return;
         if (Mathf.Abs(localVelocityX) > 2.5f)
         {
             isDrifting = true;
@@ -1525,7 +1745,7 @@ public class CarController : MonoBehaviour
     // it is high, then you could make the car to feel like going on ice.
     public void Handbrake()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         CancelInvoke("RecoverTraction");
         // We are going to start losing traction smoothly, there is were our 'driftingAxis' variable takes
         // place. This variable will start from 0 and will reach a top value of 1, which means that the maximum
@@ -1580,7 +1800,7 @@ public class CarController : MonoBehaviour
     // depending on the value of the bool variables 'isDrifting' and 'isTractionLocked'.
     public void DriftCarPS()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
 
         if (useEffects)
         {
@@ -1645,7 +1865,7 @@ public class CarController : MonoBehaviour
     // This function is used to recover the traction of the car when the user has stopped using the car's handbrake.
     public void RecoverTraction()
     {
-        if (vehicleWrecked) return;
+        if (vehicleWrecked || IsEmpDisabled) return;
         // Keep only one scheduled recovery call, even if this method is triggered
         // from more than one input path.
         CancelInvoke(nameof(RecoverTraction));
@@ -1703,6 +1923,7 @@ public class CarController : MonoBehaviour
         if (!enableVehicleImpactSystem ||
             vehicleWrecked ||
             currentVehicleHealth <= 0f ||
+            (attacker != null && attacker.IsEMP) ||
             damage <= 0f)
         {
             return false;

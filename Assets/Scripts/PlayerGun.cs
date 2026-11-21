@@ -41,6 +41,8 @@ public sealed class PlayerGun : MonoBehaviour
     [SerializeField] private AudioClip overcritSound3;
     [SerializeField] private AudioClip overcritSound4;
 
+    private CarController carController;
+
     private int evilEyeHitStacks;
     public float damagePerPellet => playerStats.gunDamagePerPellet;
 
@@ -204,7 +206,7 @@ public sealed class PlayerGun : MonoBehaviour
 
         if (playerCamera == null)
             playerCamera = GetComponentInChildren<Camera>(true);
-
+        carController = FindObjectOfType<CarController>();
         if (vehicleInteractor == null)
             vehicleInteractor = GetComponent<PlayerVehicleInteractor>();
 
@@ -478,6 +480,7 @@ public sealed class PlayerGun : MonoBehaviour
             BeginReload();
     }
 
+    int totalShotsFired;
     private bool FirePellet(Vector3 shotOrigin)
     {
         Vector3 cameraDirection = ApplyAccuracySpread(
@@ -555,6 +558,13 @@ public sealed class PlayerGun : MonoBehaviour
             ? playerInventory.GetStacksByName("Evil Eye")
             : 0;
 
+        totalShotsFired++;
+
+        bool puteyAngryDoubleDamage =
+            playerInventory != null &&
+            playerInventory.HasItemByName("Putey (Angry)") &&
+            totalShotsFired % 10 == 0;
+
         foreach (RaycastHit hit in hits)
         {
             Transform target = hit.collider.transform.root;
@@ -617,7 +627,17 @@ public sealed class PlayerGun : MonoBehaviour
                 finalDamage *= damageMultiplier;
             }
 
+            if (puteyAngryDoubleDamage)
+            {
+                finalDamage *= 2f;
+            }
+
             finalDamage += GetBonusSodaDamage();
+
+            if(playerInventory.HasItemByName("Ram Rod"))
+            {
+                finalDamage = finalDamage * 2;
+            }
 
             bool hitDamageable = ApplyDamage(
                 hit,
@@ -666,20 +686,30 @@ public sealed class PlayerGun : MonoBehaviour
 
     /// <returns>True when the hit object implements ITurretDamageable.</returns>
     private bool ApplyDamage(
-        RaycastHit hit,
-        float finalDamage,
-        int criticalHits)
+    RaycastHit hit,
+    float finalDamage,
+    int criticalHits)
     {
         ITurretDamageable damageable =
             hit.collider.GetComponentInParent<ITurretDamageable>();
 
         if (damageable != null)
         {
+            HordeEnemy enemy = damageable as HordeEnemy;
+
+            bool wasAlive = enemy != null && !enemy.IsDead;
+
             damageable.TakeDamage(
                 finalDamage,
                 hit.point,
                 knockbackForce,
                 criticalHits);
+
+            // Only reward a kill caused by this PlayerGun.
+            if (wasAlive && enemy != null && enemy.IsDead)
+            {
+                ApplyScrapHealing();
+            }
 
             return true;
         }
@@ -925,5 +955,20 @@ public sealed class PlayerGun : MonoBehaviour
         int stacks = playerInventory.GetStacksByName("Bonus Soda");
 
         return playerStats.MaxHealth * 0.2f * stacks;
+    }
+
+    private void ApplyScrapHealing()
+    {
+
+        if (!playerInventory.HasItemByName("Scrap"))
+            return;
+
+        int stacks = playerInventory.GetStacksByName("Scrap");
+
+        if (stacks <= 0)
+            return;
+
+        // Replace with your Car Durability restoration method.
+        carController.currentVehicleHealth += (1 * stacks);
     }
 }
