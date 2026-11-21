@@ -222,6 +222,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     // ==================================================
 
     [Header("Choice UI")]
+    [Tooltip("How many different rewards to offer on each level-up. Switch between 2 and 3 for testing.")]
+    [SerializeField, Range(2, 3)] private int offeredChoiceCount = 2;
     [SerializeField] private GameObject choicePanel;
     [SerializeField] private Button[] rewardButtons = new Button[3];
     [SerializeField] private TextMeshProUGUI[] rewardNameTexts = new TextMeshProUGUI[3];
@@ -270,9 +272,10 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     // RUNTIME STATE
     // ==================================================
 
-    private const int ChoiceCount = 3;
+    private const int MaxChoiceCount = 3;
     private const float StatEpsilon = 0.0001f;
-    private readonly RewardOption[] currentOptions = new RewardOption[ChoiceCount];
+    // Keep room for all three UI cards so the Inspector setting can be changed without rebuilding the UI.
+    private readonly RewardOption[] currentOptions = new RewardOption[MaxChoiceCount];
     private readonly List<RewardDefinition> candidates = new List<RewardDefinition>(64);
     private bool isApplying;
     private bool inputReady;
@@ -522,11 +525,11 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         int enabledPlayer = CountEnabled(playerRewards);
         int enabledVehicle = CountEnabled(vehicleRewards);
 
-        if (enabledPlayer < 3)
-            Debug.LogWarning("PlayerLevelRewardSystem: Fewer than three player rewards are enabled. Some offers may contain fewer than three cards.", this);
+        if (enabledPlayer < offeredChoiceCount)
+            Debug.LogWarning($"PlayerLevelRewardSystem: Fewer than {offeredChoiceCount} player rewards are enabled. Some offers may contain fewer than {offeredChoiceCount} cards.", this);
 
-        if (enabledVehicle > 0 && enabledVehicle < 3)
-            Debug.LogWarning("PlayerLevelRewardSystem: Fewer than three vehicle rewards are enabled. Vehicle-only offers may contain fewer than three cards.", this);
+        if (enabledVehicle > 0 && enabledVehicle < offeredChoiceCount)
+            Debug.LogWarning($"PlayerLevelRewardSystem: Fewer than {offeredChoiceCount} vehicle rewards are enabled. Vehicle-only offers may contain fewer than {offeredChoiceCount} cards.", this);
 
         ValidateDuplicateStats(playerRewards, RewardTarget.Player);
         ValidateDuplicateStats(vehicleRewards, RewardTarget.Vehicle);
@@ -694,6 +697,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void OnValidate()
     {
+        offeredChoiceCount = Mathf.Clamp(offeredChoiceCount, 2, MaxChoiceCount);
         commonWeight = Mathf.Max(0f, commonWeight);
         rareWeight = Mathf.Max(0f, rareWeight);
         epicWeight = Mathf.Max(0f, epicWeight);
@@ -828,7 +832,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             AddEligibleDefinitions(vehicleRewards, RewardTarget.Vehicle, candidates);
 
         int generatedCount = 0;
-        while (generatedCount < currentOptions.Length && candidates.Count > 0)
+        while (generatedCount < offeredChoiceCount && candidates.Count > 0)
         {
             int selectedIndex = GetWeightedCandidateIndex(candidates);
             RewardDefinition selectedDefinition = candidates[selectedIndex];
@@ -1246,9 +1250,10 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void UpdateCardUI()
     {
-        for (int i = 0; i < ChoiceCount; i++)
+        // Always visit all three slots so the unused card is hidden in two-choice mode.
+        for (int i = 0; i < MaxChoiceCount; i++)
         {
-            RewardOption option = currentOptions[i];
+            RewardOption option = i < offeredChoiceCount ? currentOptions[i] : null;
             bool hasOption = option != null;
             TextMeshProUGUI name = At(rewardNameTexts, i);
             TextMeshProUGUI rarity = At(rarityTexts, i);
@@ -1309,8 +1314,9 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     {
         if (rewardButtons != null)
         {
-            for (int i = 0; i < Mathf.Min(ChoiceCount, rewardButtons.Length); i++)
-                if (rewardButtons[i] != null) rewardButtons[i].interactable = value && currentOptions[i] != null;
+            for (int i = 0; i < Mathf.Min(MaxChoiceCount, rewardButtons.Length); i++)
+                if (rewardButtons[i] != null)
+                    rewardButtons[i].interactable = value && i < offeredChoiceCount && currentOptions[i] != null;
         }
     }
 
@@ -1342,7 +1348,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void SelectReward(int index)
     {
-        if (!CanChoose || index < 0 || index >= ChoiceCount) return;
+        if (!CanChoose || index < 0 || index >= offeredChoiceCount) return;
         RewardOption option = currentOptions[index];
         if (option == null) return;
         if (!IsOfferCurrent(option))

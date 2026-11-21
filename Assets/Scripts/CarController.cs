@@ -1576,7 +1576,7 @@ public class CarController : MonoBehaviour
             if (Mathf.RoundToInt(carSpeed) < maxSpeed)
             {
                 // Vehicle health never modifies the driving response.
-                float motorTorque = (accelerationMultiplier * 50f) * throttleAxis;
+                float motorTorque = (accelerationMultiplier * 85f) * throttleAxis;
                 frontLeftCollider.motorTorque = motorTorque;
                 frontRightCollider.motorTorque = motorTorque;
                 rearLeftCollider.motorTorque = motorTorque;
@@ -1612,7 +1612,7 @@ public class CarController : MonoBehaviour
             DriftCarPS();
         }
         // The following part sets the throttle power to -1 smoothly.
-        throttleAxis = throttleAxis - (Time.deltaTime * 3f);
+        throttleAxis = throttleAxis - (Time.deltaTime * 6f);
         if (throttleAxis < -1f)
         {
             throttleAxis = -1f;

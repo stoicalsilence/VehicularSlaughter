@@ -1048,15 +1048,15 @@ public sealed class HordeManager : MonoBehaviour
             terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
             terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
 
-            for (int i = 0; i < 10; i++)
-            {
-                int r = Random.Range(0, 100);
+            //for (int i = 0; i < 10; i++)
+            //{
+            //    int r = Random.Range(0, 100);
 
-                if (r < (playerStats.itemLuck))
-                {
-                    terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
-                }
-            }
+            //    if (r < (playerStats.itemLuck))
+            //    {
+            //        terrainGenerator.SpawnRuntimePOI(Random.Range(0, 100) < corruptedCrateSpawnChance ? corruptedCratePrefab : cratePrefab, player.position, fountainMinDistance, fountainMaxDistance, true);
+            //    }
+            //}
         }
     }
 

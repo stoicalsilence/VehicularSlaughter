@@ -40,6 +40,10 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
     [Tooltip("Press Q to mark a visible enemy near the screen centre, both on foot and in a car. Disable for exact crosshair marking.")]
     [FormerlySerializedAs("easyMarkingInCar")]
     [SerializeField] private bool easyTargetMarking = true;
+    [Tooltip("When enabled, prefer visible EMP enemies, then Elites, then normal enemies inside the aim-assist area. A direct crosshair hit on a special enemy still wins.")]
+    [SerializeField] private bool prioritizeSpecialTargets = true;
+    [Tooltip("Performance option: set to enemy collider layers only. The line-of-sight raycasts still use Mark Target Layers so walls block marks.")]
+    [SerializeField] private LayerMask markCandidateLayers = ~0;
     [Tooltip("Horizontal aim-assist radius as a fraction of screen width (0.22 = 22%).")]
     [FormerlySerializedAs("carMarkHorizontalRadius")]
     [SerializeField, Range(0.02f, 0.5f)] private float markHorizontalRadius = 0.22f;
@@ -175,18 +179,32 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             turret == null || !turret.isActiveAndEnabled)
             return;
 
-        // Exact crosshair hits always have priority. Only if the centre ray
-        // does not hit a living enemy do we try the forgiving nearby selection.
-        if (TryExactMark(aimCamera, turret, occupiedCarRoot))
+        // Read the centre ray first, preserving deliberate crosshair selection.
+        // A directly aimed-at EMP/Elite is always selected immediately.
+        HordeEnemy exactEnemy = FindExactMarkTarget(aimCamera, occupiedCarRoot);
+        if (exactEnemy != null &&
+            (!easyTargetMarking || !prioritizeSpecialTargets ||
+             exactEnemy.IsEMP || exactEnemy.IsElite))
+        {
+            turret.MarkTarget(exactEnemy.transform);
             return;
+        }
 
-        if (easyTargetMarking)
-            TryEasyMark(aimCamera, turret, occupiedCarRoot);
+        // When the crosshair hits a normal enemy, only a visible special enemy
+        // may override it. This also skips unnecessary normal-enemy LOS tests.
+        HordeEnemy assistedEnemy = easyTargetMarking
+            ? FindEasyMarkTarget(aimCamera, occupiedCarRoot,
+                prioritizeSpecialTargets && exactEnemy != null)
+            : null;
+
+        HordeEnemy chosenEnemy = assistedEnemy != null ? assistedEnemy : exactEnemy;
+        if (chosenEnemy != null)
+            turret.MarkTarget(chosenEnemy.transform);
     }
 
     // The first non-self collider on the centre ray must be a living enemy.
     // World geometry remains solid and blocks enemies behind it.
-    private bool TryExactMark(Camera aimCamera, TurretGun turret, Transform occupiedCarRoot)
+    private HordeEnemy FindExactMarkTarget(Camera aimCamera, Transform occupiedCarRoot)
     {
         Ray ray = aimCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         float distance = Mathf.Max(1f, markTargetDistance);
@@ -229,34 +247,33 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         }
 
         if (closest == null)
-            return false;
+            return null;
 
         HordeEnemy enemy = closest.GetComponentInParent<HordeEnemy>();
-        if (enemy == null || !enemy.isActiveAndEnabled || enemy.IsDead)
-            return false;
-
-        turret.MarkTarget(enemy.transform);
-        return true;
+        return enemy != null && enemy.isActiveAndEnabled && !enemy.IsDead ? enemy : null;
     }
 
-    // Called only on a Q press in either mode, not every frame.
-    private bool TryEasyMark(Camera camera, TurretGun turret, Transform carRoot)
+    // Called only on a Q press in either mode, never every frame.
+    // Returns a target; its priority is EMP > Elite > Normal, with screen
+    // centering and distance only breaking ties within the same priority.
+    private HordeEnemy FindEasyMarkTarget(Camera camera, Transform carRoot, bool specialOnly)
     {
         Vector3 origin = camera.transform.position;
         float maxDistance = Mathf.Max(1f, markTargetDistance);
         int count = Physics.OverlapSphereNonAlloc(origin, maxDistance,
-            easyMarkCandidates, markTargetLayers, QueryTriggerInteraction.Ignore);
+            easyMarkCandidates, markCandidateLayers, QueryTriggerInteraction.Ignore);
 
         // Do not silently lose potential targets if the fixed buffer fills up.
         Collider[] candidates = easyMarkCandidates;
         if (count == easyMarkCandidates.Length)
         {
             candidates = Physics.OverlapSphere(origin, maxDistance,
-                markTargetLayers, QueryTriggerInteraction.Ignore);
+                markCandidateLayers, QueryTriggerInteraction.Ignore);
             count = candidates.Length;
         }
 
         HordeEnemy bestEnemy = null;
+        int bestPriority = -1;
         float bestScore = float.PositiveInfinity;
         float horizontalRadius = Mathf.Max(0.02f, markHorizontalRadius);
         float verticalRadius = Mathf.Max(0.02f, markVerticalRadius);
@@ -269,6 +286,10 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
             HordeEnemy enemy = col.GetComponentInParent<HordeEnemy>();
             if (enemy == null || !enemy.isActiveAndEnabled || enemy.IsDead)
+                continue;
+
+            int priority = prioritizeSpecialTargets ? GetMarkPriority(enemy) : 0;
+            if ((specialOnly && priority == 0) || priority < bestPriority)
                 continue;
 
             // Use the collider's centre, so the player need not hit a tiny hitbox.
@@ -288,9 +309,9 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             if (range < 0.001f || range > maxDistance)
                 continue;
 
-            // Prefer the most centred target, using distance as a tie-breaker.
+            // Only raycast if this candidate can beat the current best.
             float score = screenScore + 0.001f * (range / maxDistance);
-            if (score >= bestScore)
+            if (priority == bestPriority && score >= bestScore)
                 continue;
 
             // Ignore the player and (when driving) the occupied car, but not obstacles.
@@ -325,15 +346,19 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
             if (first == null || first.GetComponentInParent<HordeEnemy>() != enemy)
                 continue;
 
+            bestPriority = priority;
             bestScore = score;
             bestEnemy = enemy;
         }
 
-        if (bestEnemy == null)
-            return false;
+        return bestEnemy;
+    }
 
-        turret.MarkTarget(bestEnemy.transform);
-        return true;
+    private static int GetMarkPriority(HordeEnemy enemy)
+    {
+        if (enemy.IsEMP) return 2;
+        if (enemy.IsElite) return 1;
+        return 0;
     }
 
     private VehicleSeat FindNearbyVehicle()

@@ -5822,6 +5822,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2737562795236806165}
+  - component: {fileID: 3870959129695180255}
   m_Layer: 0
   m_Name: Wishin' Well
   m_TagString: Untagged
@@ -5854,6 +5855,20 @@ Transform:
   m_Father: {fileID: 2737562796675061486}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!136 &3870959129695180255
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2737562795236806166}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 0
+  m_Enabled: 1
+  m_Radius: 3.23
+  m_Height: 16.7
+  m_Direction: 1
+  m_Center: {x: -2.86, y: 4.3, z: 0.11}
 --- !u!1 &2737562795428953206
 GameObject:
   m_ObjectHideFlags: 0
