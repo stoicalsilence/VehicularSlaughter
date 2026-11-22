@@ -70,6 +70,10 @@ public sealed class PlayerHealth : MonoBehaviour
 
     public event Action<float, float> HealthChanged;
 
+    private float nextChunkyLaunchTime;
+    private const float ChunkyLaunchGraceSeconds = 0.75f;
+    private Q3Movement.Q3PlayerController chunkyMovement;
+
     private void Awake()
     {
         if (playerStats == null)
@@ -238,6 +242,9 @@ public sealed class PlayerHealth : MonoBehaviour
         // Always refresh contact time, even when this enemy is on cooldown.
         // This prevents the cleanup pass from deleting a live attacker's timer.
         state.lastContactTime = now;
+
+        if (enemy.ChunkyImpact != null)
+            enemy.ChunkyImpact.TryLaunchPlayer(this);
 
         TakeDamage(enemy.contactDamage, enemy);
     }
@@ -433,5 +440,26 @@ public sealed class PlayerHealth : MonoBehaviour
         }
 
         HealthChanged?.Invoke(currentHealth, newMax);
+    }
+
+    public bool TryApplyChunkyLaunch(Vector3 worldVelocity)
+    {
+        if (Time.time < nextChunkyLaunchTime || !isActiveAndEnabled ||
+            currentHealth <= 0f || characterController == null ||
+            !characterController.enabled ||
+            (vehicleInteractor != null && vehicleInteractor.IsInVehicle))
+            return false;
+
+        // This component is on the same player root as PlayerHealth.
+        // Cache on first impact; no repeated scene searches or per-frame GetComponent.
+        if (chunkyMovement == null)
+            chunkyMovement = GetComponent<Q3Movement.Q3PlayerController>();
+
+        if (chunkyMovement == null || !chunkyMovement.isActiveAndEnabled)
+            return false;
+
+        nextChunkyLaunchTime = Time.time + ChunkyLaunchGraceSeconds;
+        chunkyMovement.Launch(worldVelocity);
+        return true;
     }
 }

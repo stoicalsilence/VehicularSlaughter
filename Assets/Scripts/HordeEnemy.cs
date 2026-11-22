@@ -21,6 +21,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public bool CanBeEMP => allowEmpVariant && empBlueMaterial != null;
     // Combat behavior is a prefab component, NOT a mutually exclusive variant.
     public bool IsRanged => rangedAttack != null && rangedAttack.enabled;
+    // Chunky is also a prefab component. Only collision/contact hooks call it.
+    public HordeChunkyImpact ChunkyImpact { get; private set; }
     // Prevent recycled enemies from inheriting ownership of a projectile in flight.
     public uint SpawnGeneration { get; private set; }
 
@@ -218,6 +220,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         baseLocalScale = transform.localScale;
         baseCollisionMode = rb.collisionDetectionMode;
         rangedAttack = GetComponent<HordeRangedAttack>();
+        ChunkyImpact = GetComponent<HordeChunkyImpact>();
         CacheVariantRenderers();
 
         baseContactDamage = contactDamage;
@@ -1021,7 +1024,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
                 AudioManager.Play3D(
                     deathSound,
                     deathPosition,
-                    deathSoundVolume
+                    deathSoundVolume, 1, 1, 50, 100
                 );
             }
         }

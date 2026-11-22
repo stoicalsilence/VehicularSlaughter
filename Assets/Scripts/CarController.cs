@@ -594,6 +594,10 @@ public class CarController : MonoBehaviour
         HordeEnemy enemy = collision.collider != null
             ? collision.collider.GetComponentInParent<HordeEnemy>() : null;
         if (HandleEMPContact(collision, enemy)) return;
+        // Reuses the existing car collision event; no extra overlap scan.
+        // EMP detonation deliberately takes priority over Chunky launching.
+        if (enemy != null && !enemy.IsDead && enemy.ChunkyImpact != null)
+            enemy.ChunkyImpact.TryLaunchVehicle(this);
         HandleEnemyImpact(collision, enemy);
         HandleEnemyContactDamage(collision, enemy);
 
@@ -666,6 +670,10 @@ public class CarController : MonoBehaviour
         HordeEnemy enemy = collision.collider != null
             ? collision.collider.GetComponentInParent<HordeEnemy>() : null;
         if (HandleEMPContact(collision, enemy)) return;
+        // Reuses the existing car collision event; no extra overlap scan.
+        // EMP detonation deliberately takes priority over Chunky launching.
+        if (enemy != null && !enemy.IsDead && enemy.ChunkyImpact != null)
+            enemy.ChunkyImpact.TryLaunchVehicle(this);
         HandleEnemyImpact(collision, enemy);
         HandleEnemyContactDamage(collision, enemy);
     }
@@ -969,7 +977,6 @@ public class CarController : MonoBehaviour
             if (occupant.currentCarController == this)
                 EjectOccupant(occupant);
         }
-
         StopWreckDriving();
 
         if (wreckFire != null)
@@ -1912,6 +1919,38 @@ public class CarController : MonoBehaviour
 
             driftingAxis = 0f;
         }
+    }
+
+    // Short car-wide immunity prevents several Chunkies hitting on the same
+    // physics step from adding unbounded impulses. Per-Chunky cooldown is separate.
+    private float nextChunkyLaunchTime;
+    private const float ChunkyLaunchGraceSeconds = 0.75f;
+
+    /// <summary>
+    /// External one-shot launch, in world-space velocity changes (m/s and rad/s).
+    /// Not a damage path. Leaves contact damage, car thorns, and EMP intact.
+    /// </summary>
+    public bool TryApplyChunkyLaunch(Vector3 velocityChange, Vector3 angularVelocityChange)
+    {
+        if (!isActiveAndEnabled || !enableVehicleImpactSystem || vehicleWrecked ||
+            carRigidbody == null || carRigidbody.isKinematic ||
+            Time.time < nextChunkyLaunchTime)
+            return false;
+
+        // A parked vehicle has FreezeAll constraints; remove only the parking
+        // lock before applying the impact. This also works when nobody is driving.
+        if (parkingBrakeEngaged || parkingPositionLocked)
+        {
+            parkingBrakeEngaged = false;
+            UnlockParkingPosition();
+            if (!IsEmpDisabled) ReleaseBrakes();
+        }
+
+        nextChunkyLaunchTime = Time.time + ChunkyLaunchGraceSeconds;
+        carRigidbody.WakeUp();
+        carRigidbody.AddForce(velocityChange, ForceMode.VelocityChange);
+        carRigidbody.AddTorque(angularVelocityChange, ForceMode.VelocityChange);
+        return true;
     }
 
     /// <summary>

@@ -251,13 +251,12 @@ public sealed class PlayerGrenades : MonoBehaviour
 
     private bool CanThrow()
     {
-        if (vehicleInteractor != null && vehicleInteractor.IsInVehicle)
+        if (vehicleInteractor.IsInVehicle)
             return false;
-        if (playerCamera == null || !playerCamera.isActiveAndEnabled)
+
+        if (playerHealth.CurrentHealth <= 0f)
             return false;
-        if (playerHealth != null && playerHealth.CurrentHealth <= 0f)
-            return false;
-        // PlayerRadio disables PlayerGun when opened. Don't let G interrupt the radio.
+
         return true;
     }
 

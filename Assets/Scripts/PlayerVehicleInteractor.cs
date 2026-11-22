@@ -505,6 +505,11 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
 
         VehicleSeat vehicle = currentVehicle;
         Transform exitPoint = vehicle.ExitPoint;
+
+        currentVehicle = null;
+        nearbyVehicle = null;
+        currentCarController = null;
+
         AudioManager.Play2D(exitVehicleSound, 1);
 
         // Disable the vehicle camera first.
@@ -554,10 +559,6 @@ public sealed class PlayerVehicleInteractor : MonoBehaviour
         }
 
         vehicle.Release();
-
-        currentVehicle = null;
-        nearbyVehicle = null;
-        currentCarController = null;
 
         // Restore the first-person camera.
         if (playerCamera != null)
