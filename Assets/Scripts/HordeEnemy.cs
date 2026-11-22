@@ -203,6 +203,21 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public float MoveSpeed => moveSpeed * SpeedMultiplier;
     public float ClimbSpeed => climbSpeed * SpeedMultiplier;
 
+    // Fast, allocation-free read for the centralized footstep controller.
+    // No raycasts or extra components per enemy.
+    internal bool IsMovingForFootsteps
+    {
+        get
+        {
+            if (isDead || !isActiveAndEnabled || isClimbing ||
+                knockbackTimer > 0f || rb == null)
+                return false;
+
+            Vector3 v = rb.velocity;
+            return Mathf.Abs(v.y) < 1.8f && (v.x * v.x + v.z * v.z) > 0.64f;
+        }
+    }
+
     // Contact damage stays a public field for existing player/car callers.
     // Capture it once, then restore from the base on every pool reuse.
     private float baseContactDamage;

@@ -14,6 +14,8 @@ public sealed class HordeManager : MonoBehaviour
     [Header("References")]
     [SerializeField] private Transform player;
     [SerializeField] private HordeEnemy enemyPrefab;
+    [Header("Horde Footstep Audio")]
+    [SerializeField] private HordeFootstepAudio footstepAudio;
     [Header("Enemy Archetypes (prefabs, not modifiers)")]
     [Tooltip("Relative spawn weight of the original melee prefab. Keeps the existing Enemy Prefab reference.")]
     [SerializeField, Min(0f)] private float defaultEnemyWeight = 1f;
@@ -337,6 +339,8 @@ public sealed class HordeManager : MonoBehaviour
         }
 
         Instance = this;
+        if (footstepAudio == null)
+            footstepAudio = GetComponent<HordeFootstepAudio>();
 
         if (playerStats == null && player != null)
             playerStats = player.GetComponentInParent<PlayerStats>();
@@ -459,6 +463,10 @@ public sealed class HordeManager : MonoBehaviour
                 targetPosition
             );
         }
+
+        // Reuse the existing enemy list and manager tick; no per-enemy audio Update().
+        if (IsRunning && hasPlayer && footstepAudio != null)
+            footstepAudio.ManagedTick(activeEnemies, player, elapsed);
     }
 
 

@@ -92108,7 +92108,7 @@ MonoBehaviour:
   climbableLayers:
     serializedVersion: 2
     m_Bits: 1
-  wallProbeDistance: 1.2
+  wallProbeDistance: 4
   maxWallNormalY: 0.35
   climbSpeed: 4
   climbAcceleration: 20
