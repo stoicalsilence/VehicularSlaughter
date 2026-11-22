@@ -19,6 +19,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public bool IsEMP => Variant == HordeEnemyVariant.EMP;
     public bool CanBeElite => allowEliteVariant;
     public bool CanBeEMP => allowEmpVariant && empBlueMaterial != null;
+    // Combat behavior is a prefab component, NOT a mutually exclusive variant.
+    public bool IsRanged => rangedAttack != null && rangedAttack.enabled;
+    // Prevent recycled enemies from inheriting ownership of a projectile in flight.
+    public uint SpawnGeneration { get; private set; }
+
+    private HordeRangedAttack rangedAttack;
 
     private Vector3 baseLocalScale;
     private CollisionDetectionMode baseCollisionMode;
@@ -32,7 +38,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     }
     private readonly List<VariantRendererState> variantRenderers = new List<VariantRendererState>();
 
-    private float EffectiveStopDistance => IsEMP ? 0f : stopDistance;
+    private float EffectiveStopDistance => IsEMP ? 0f : IsRanged ? rangedAttack.HoldDistance : stopDistance;
     private float VariantMotionMultiplier => IsEMP || IsElite ? Mathf.Max(1f, variantSpeedMultiplier) : 1f;
     private float variantSpeedMultiplier = 1f;
 
@@ -211,6 +217,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         defaultGravity = rb.useGravity;
         baseLocalScale = transform.localScale;
         baseCollisionMode = rb.collisionDetectionMode;
+        rangedAttack = GetComponent<HordeRangedAttack>();
         CacheVariantRenderers();
 
         baseContactDamage = contactDamage;
@@ -296,6 +303,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         Vector3 horizontalDirection =
             Vector3.ProjectOnPlane(toTarget, Vector3.up);
+
+        // The optional ranged component is deliberately ticked by this manager-owned
+        // simulation, never by its own Update/FixedUpdate. EMP overrides shooting.
+        if (!IsEMP && rangedAttack != null && !isClimbing &&
+            rangedAttack.ManagedTick(dt, targetPosition, horizontalDirection))
+            return;
 
         // Already climbing?
         if (isClimbing)
@@ -392,6 +405,20 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         Velocity = currentVelocity;
 
         FaceDirection(nextHorizontal, dt);
+    }
+
+    // Called only while a ranged prefab is holding position. Avoids a separation
+    // physics query for every stationary shooter.
+    internal bool BrakeAndFaceRanged(float dt, Vector3 faceDirection)
+    {
+        Vector3 velocity = Velocity;
+        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
+        horizontal = Vector3.MoveTowards(horizontal, Vector3.zero, acceleration * dt);
+        velocity.x = horizontal.x;
+        velocity.z = horizontal.z;
+        Velocity = velocity;
+        FaceDirection(faceDirection, dt);
+        return horizontal.sqrMagnitude <= 0.04f;
     }
 
     // ------------------------------------------------
@@ -621,6 +648,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         nextVehicleHitTime = 0f;
         knockbackTimer = 0f;
         simulationTimer = 0f;
+        if (rangedAttack != null)
+            rangedAttack.ResetForPool();
 
         if (rb == null)
             return;
@@ -669,11 +698,14 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         HealthMultiplier = SanitizeMultiplier(healthMultiplier);
         SpeedMultiplier = SanitizeMultiplier(speedMultiplier);
         DamageMultiplier = SanitizeMultiplier(damageMultiplier);
-        contactDamage = Mathf.Max(0f, baseContactDamage) * DamageMultiplier;
+        contactDamage = IsRanged && !IsEMP ? 0f : Mathf.Max(0f, baseContactDamage) * DamageMultiplier;
         currentHealth = MaxHealth;
         isDead = false;
 
         ResetMovementState();
+        unchecked { SpawnGeneration++; }
+        if (rangedAttack != null)
+            rangedAttack.ResetForSpawn(this);
 
         simulationTimer = Random.Range(0f, 0.2f);
     }
@@ -800,6 +832,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         );
 
         knockbackTimer = knockbackDuration;
+        if (rangedAttack != null)
+            rangedAttack.CancelForKnockback();
     }
 
     private void PlayHitSound()
@@ -895,6 +929,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         foreach (Renderer renderer in GetComponentsInChildren<Renderer>(true))
         {
+            // Do not flash a ranged telegraph material with the enemy's body.
+            if (rangedAttack != null && rangedAttack.IsChargeVisual(renderer.transform))
+                continue;
             if (!(renderer is MeshRenderer) && !(renderer is SkinnedMeshRenderer))
                 continue;
 

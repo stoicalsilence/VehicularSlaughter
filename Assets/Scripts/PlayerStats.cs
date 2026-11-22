@@ -43,6 +43,21 @@ public sealed class PlayerStats : MonoBehaviour
     [SerializeField, Min(0.1f)] public float gunMaxShotDistance = 60f;
     [SerializeField, Min(0f)] public float pierces = 0f;
 
+    [Header("Grenades")]
+    [Tooltip("Maximum number of grenades the player may store. Zero disables grenades.")]
+    [SerializeField, Min(0)] public int grenadeCapacity = 2;
+    [Tooltip("Seconds to restore ONE grenade. Multiple missing grenades recharge sequentially.")]
+    [SerializeField, Min(0.01f)] public float grenadeRechargeSeconds = 30f;
+    [Tooltip("Explosion damage passed to ExplosionUtility.")]
+    [SerializeField, Min(0f)] public float grenadeDamage = 75f;
+    [Tooltip("Damage radius in world units (not the visual-effect size).")]
+    [SerializeField, Min(0f)] public float grenadeExplosionRadius = 4f;
+    [SerializeField, Min(0f)] public float grenadeKnockbackForce = 8f;
+    [Tooltip("Initial throw velocity in world units per second.")]
+    [SerializeField, Min(0.1f)] public float grenadeThrowSpeed = 14f;
+    [Tooltip("Seconds after release until detonation, including flight/bounces.")]
+    [SerializeField, Min(0.1f)] public float grenadeFuseSeconds = 2.2f;
+
     [Header("Misc")]
     [SerializeField, Min(0f)] public float itemLuck = 0f;
     [SerializeField, Min(1f)] public float xpGain = 1f;
@@ -101,6 +116,7 @@ public sealed class PlayerStats : MonoBehaviour
         airDeceleration = Mathf.Max(0f, airDeceleration);
         strafeMaxSpeed = Mathf.Max(0f, strafeMaxSpeed);
         strafeAcceleration = Mathf.Max(0f, strafeAcceleration);
+        strafeDeceleration = Mathf.Max(0f, strafeDeceleration);
         friction = Mathf.Max(0f, friction);
         gravity = Mathf.Max(0f, gravity);
         jumpForce = Mathf.Max(0f, jumpForce);
@@ -116,6 +132,14 @@ public sealed class PlayerStats : MonoBehaviour
         gunMagazineSize = Mathf.Max(1, gunMagazineSize);
         gunReloadDuration = Mathf.Max(0.01f, gunReloadDuration);
         gunMaxShotDistance = Mathf.Max(0.1f, gunMaxShotDistance);
+
+        grenadeCapacity = Mathf.Max(0, grenadeCapacity);
+        grenadeRechargeSeconds = Mathf.Max(0.01f, grenadeRechargeSeconds);
+        grenadeDamage = Mathf.Max(0f, grenadeDamage);
+        grenadeExplosionRadius = Mathf.Max(0f, grenadeExplosionRadius);
+        grenadeKnockbackForce = Mathf.Max(0f, grenadeKnockbackForce);
+        grenadeThrowSpeed = Mathf.Max(0.1f, grenadeThrowSpeed);
+        grenadeFuseSeconds = Mathf.Max(0.1f, grenadeFuseSeconds);
 
         itemLuck = Mathf.Max(0f, itemLuck);
         xpGain = Mathf.Max(1f, xpGain);

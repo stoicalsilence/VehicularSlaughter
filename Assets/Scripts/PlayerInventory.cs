@@ -65,6 +65,14 @@ public enum PlayerStatToModify
     RadioAirstrikeScale,
     RadioAirstrikeDamage,
     RadioAirstrikeDamageMultiplier,
+
+    GrenadeCapacity,
+    GrenadeRechargeSeconds,
+    GrenadeDamage,
+    GrenadeExplosionRadius,
+    GrenadeKnockbackForce,
+    GrenadeThrowSpeed,
+    GrenadeFuseSeconds,
 }
 
 public enum ItemStatTarget
@@ -879,6 +887,29 @@ public sealed class PlayerInventory : MonoBehaviour
 
             case PlayerStatToModify.RadioAirstrikeDamageMultiplier:
                 return s.radioAirstrikeDamageMultiplier;
+
+
+            case PlayerStatToModify.GrenadeCapacity:
+                return s.grenadeCapacity;
+
+            case PlayerStatToModify.GrenadeRechargeSeconds:
+                return s.grenadeRechargeSeconds;
+
+            case PlayerStatToModify.GrenadeDamage:
+                return s.grenadeDamage;
+
+            case PlayerStatToModify.GrenadeExplosionRadius:
+                return s.grenadeExplosionRadius;
+
+            case PlayerStatToModify.GrenadeKnockbackForce:
+                return s.grenadeKnockbackForce;
+
+            case PlayerStatToModify.GrenadeThrowSpeed:
+                return s.grenadeThrowSpeed;
+
+            case PlayerStatToModify.GrenadeFuseSeconds:
+                return s.grenadeFuseSeconds;
+
         }
 
         return 0f;
@@ -1263,6 +1294,36 @@ public sealed class PlayerInventory : MonoBehaviour
             case PlayerStatToModify.RadioAirstrikeDelay:
                 s.radioAirstrikeDelay = Mathf.Max(0, value);
                 break;
+
+
+            case PlayerStatToModify.GrenadeCapacity:
+                s.grenadeCapacity = Mathf.Max(0, Mathf.RoundToInt(value));
+                break;
+
+            case PlayerStatToModify.GrenadeRechargeSeconds:
+                s.grenadeRechargeSeconds = Mathf.Max(0.01f, value);
+                break;
+
+            case PlayerStatToModify.GrenadeDamage:
+                s.grenadeDamage = Mathf.Max(0f, value);
+                break;
+
+            case PlayerStatToModify.GrenadeExplosionRadius:
+                s.grenadeExplosionRadius = Mathf.Max(0f, value);
+                break;
+
+            case PlayerStatToModify.GrenadeKnockbackForce:
+                s.grenadeKnockbackForce = Mathf.Max(0f, value);
+                break;
+
+            case PlayerStatToModify.GrenadeThrowSpeed:
+                s.grenadeThrowSpeed = Mathf.Max(0.1f, value);
+                break;
+
+            case PlayerStatToModify.GrenadeFuseSeconds:
+                s.grenadeFuseSeconds = Mathf.Max(0.1f, value);
+                break;
+
         }
     }
 

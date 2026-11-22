@@ -14,6 +14,22 @@ public sealed class HordeManager : MonoBehaviour
     [Header("References")]
     [SerializeField] private Transform player;
     [SerializeField] private HordeEnemy enemyPrefab;
+    [Header("Enemy Archetypes (prefabs, not modifiers)")]
+    [Tooltip("Relative spawn weight of the original melee prefab. Keeps the existing Enemy Prefab reference.")]
+    [SerializeField, Min(0f)] private float defaultEnemyWeight = 1f;
+    [Serializable]
+    private sealed class AdditionalEnemyType
+    {
+        public HordeEnemy prefab;
+        [Tooltip("Relative weight. 0 prevents this type from appearing in random spawning.")]
+        [Min(0f)] public float spawnWeight = 0.14f;
+        [Min(0f)] public float unlockSeconds = 45f;
+        [Tooltip("Maximum simultaneously active enemies of this prefab. 0 disables it.")]
+        [Min(0)] public int maxActive = 28;
+        [Min(0)] public int prewarm = 12;
+    }
+    [SerializeField] private AdditionalEnemyType[] additionalEnemyTypes = new AdditionalEnemyType[0];
+    [SerializeField] private HordeProjectilePool rangedProjectilePool;
     [SerializeField] private XPBlobPool xpBlobPool;
     [SerializeField] private PlayerInventory playerInventory;
     [SerializeField] private DeathParticlePool deathParticlePool;
@@ -50,6 +66,9 @@ public sealed class HordeManager : MonoBehaviour
     private int activeEMPCount;
     private float nextEMPSpawnSeconds;
     public int ActiveEMPCount => activeEMPCount;
+    // Total shooting-archetype count (not a modifier). Retained for compatibility.
+    private int activeRangedCount;
+    public int ActiveRangedCount => activeRangedCount;
 
     [Header("Enemy Pool")]
     [SerializeField] private int prewarmCount = 100;
@@ -226,13 +245,38 @@ public sealed class HordeManager : MonoBehaviour
     private readonly Dictionary<HordeEnemy, int> enemyIndices =
         new Dictionary<HordeEnemy, int>();
 
-    // Inactive enemies.
-    private readonly Stack<HordeEnemy> enemyPool =
-        new Stack<HordeEnemy>();
+    // Every prefab has a separate inactive stack; variants of THAT prefab share its stack.
+    // Consequently an Elite Ranged returns to the Ranged pool, not the Regular pool.
+    private sealed class EnemyPool
+    {
+        internal readonly HordeEnemy prefab;
+        internal readonly float weight;
+        internal readonly float unlockSeconds;
+        internal readonly int maxActive;
+        internal readonly int prewarm;
+        internal readonly bool isRanged;
+        internal int activeCount;
+        internal readonly Stack<HordeEnemy> inactive = new Stack<HordeEnemy>();
 
-    // Prevents an enemy from being added to the pool twice.
+        internal EnemyPool(HordeEnemy prefab, float weight, float unlockSeconds,
+            int maxActive, int prewarm)
+        {
+            this.prefab = prefab;
+            // Prefab Awake has not necessarily run: inspect its component once here.
+            HordeRangedAttack ranged = prefab.GetComponent<HordeRangedAttack>();
+            this.isRanged = ranged != null && ranged.enabled;
+            this.weight = Mathf.Max(0f, weight);
+            this.unlockSeconds = Mathf.Max(0f, unlockSeconds);
+            this.maxActive = Mathf.Max(0, maxActive);
+            this.prewarm = Mathf.Max(0, prewarm);
+        }
+    }
+    private readonly List<EnemyPool> enemyPools = new List<EnemyPool>();
+    private readonly Dictionary<HordeEnemy, EnemyPool> owningPools =
+        new Dictionary<HordeEnemy, EnemyPool>();
     private readonly HashSet<HordeEnemy> pooledEnemies =
         new HashSet<HordeEnemy>();
+    private int inactiveEnemyCount;
 
     // Inactive parent for pooled enemies.
     private Transform poolRoot;
@@ -256,7 +300,7 @@ public sealed class HordeManager : MonoBehaviour
             spawnCredit = 0f;
             return;
         }
-        if (deltaTime <= 0f || player == null || enemyPrefab == null) return;
+        if (deltaTime <= 0f || player == null || enemyPools.Count == 0) return;
 
         int available = runActiveLimit - activeEnemies.Count;
         if (available <= 0)
@@ -281,7 +325,7 @@ public sealed class HordeManager : MonoBehaviour
     public Transform Player => player;
 
     public int ActiveEnemyCount => activeEnemies.Count;
-    public int PooledEnemyCount => enemyPool.Count;
+    public int PooledEnemyCount => inactiveEnemyCount;
 
     private void Awake()
     {
@@ -311,8 +355,17 @@ public sealed class HordeManager : MonoBehaviour
             announcementText.gameObject.SetActive(false);
         }
 
+        if (rangedProjectilePool != null && player != null)
+        {
+            PlayerHealth health = player.GetComponent<PlayerHealth>();
+            if (health == null) health = player.GetComponentInParent<PlayerHealth>();
+            if (health == null) health = player.GetComponentInChildren<PlayerHealth>(true);
+            rangedProjectilePool.SetPlayer(health);
+        }
+
         CreatePoolRoot();
-        PrewarmPool();
+        BuildEnemyPools();
+        PrewarmPools();
     }
 
 
@@ -421,7 +474,9 @@ public sealed class HordeManager : MonoBehaviour
 
         enemyIndices.Add(enemy, activeEnemies.Count);
         activeEnemies.Add(enemy);
+        if (owningPools.TryGetValue(enemy, out EnemyPool pool)) pool.activeCount++;
         if (enemy.IsEMP) activeEMPCount++;
+        if (enemy.IsRanged) activeRangedCount++;
     }
 
     // Called automatically by HordeEnemy.OnDisable().
@@ -442,8 +497,13 @@ public sealed class HordeManager : MonoBehaviour
 
         HordeEnemy removed = activeEnemies[index];
         HordeEnemy last = activeEnemies[lastIndex];
-        if (!object.ReferenceEquals(removed, null) && removed.IsEMP)
-            activeEMPCount = Mathf.Max(0, activeEMPCount - 1);
+        if (!object.ReferenceEquals(removed, null))
+        {
+            if (removed.IsEMP) activeEMPCount = Mathf.Max(0, activeEMPCount - 1);
+            if (removed.IsRanged) activeRangedCount = Mathf.Max(0, activeRangedCount - 1);
+            if (owningPools.TryGetValue(removed, out EnemyPool pool))
+                pool.activeCount = Mathf.Max(0, pool.activeCount - 1);
+        }
 
         activeEnemies[index] = last;
         activeEnemies.RemoveAt(lastIndex);
@@ -469,51 +529,95 @@ public sealed class HordeManager : MonoBehaviour
         poolRoot = root.transform;
     }
 
-    private HordeEnemy CreateEnemy()
+    // The original enemy prefab stays the default melee enemy. Add Ranged and later
+    // Chunky through Additional Enemy Types; they only need the common HordeEnemy.
+    private void BuildEnemyPools()
     {
-        HordeEnemy enemy = Instantiate(
-            enemyPrefab,
-            poolRoot
-        );
+        enemyPools.Clear();
+        if (enemyPrefab != null)
+            enemyPools.Add(new EnemyPool(enemyPrefab, defaultEnemyWeight, 0f,
+                int.MaxValue, prewarmCount));
 
-        // Configure dependencies before activating the enemy.
-        // The parent is inactive, so Awake/OnEnable haven't run yet.
+        if (additionalEnemyTypes == null) return;
+        for (int i = 0; i < additionalEnemyTypes.Length; i++)
+        {
+            AdditionalEnemyType entry = additionalEnemyTypes[i];
+            if (entry == null || entry.prefab == null) continue;
+            bool duplicate = false;
+            for (int j = 0; j < enemyPools.Count; j++)
+                if (enemyPools[j].prefab == entry.prefab) { duplicate = true; break; }
+            if (duplicate)
+            {
+                Debug.LogWarning("HordeManager: Duplicate enemy prefab in Additional Enemy Types was skipped.", this);
+                continue;
+            }
+            enemyPools.Add(new EnemyPool(entry.prefab, entry.spawnWeight,
+                entry.unlockSeconds, entry.maxActive, entry.prewarm));
+        }
+    }
+
+    private HordeEnemy CreateEnemy(EnemyPool pool)
+    {
+        HordeEnemy enemy = Instantiate(pool.prefab, poolRoot);
+        // The parent is inactive. Register ownership before OnEnable can fire.
+        owningPools[enemy] = pool;
         enemy.gameObject.SetActive(true);
         enemy.xpBlobPool = xpBlobPool;
         enemy.deathParticlePool = deathParticlePool;
         enemy.playerInventory = playerInventory;
-
-        // Moving to an active parent initializes the enemy.
+        // Activates the instance for first-time Awake/initialization.
         enemy.transform.SetParent(transform, false);
-
         enemy.PrepareForPool();
         enemy.gameObject.SetActive(false);
-
         enemy.transform.SetParent(poolRoot, false);
-
         return enemy;
     }
 
-    private void PrewarmPool()
+    private void PrewarmPools()
     {
-        if (enemyPrefab == null)
+        int budget = Mathf.Max(0, maxPoolSize);
+        for (int i = 0; i < enemyPools.Count && inactiveEnemyCount < budget; i++)
         {
-            Debug.LogError("HordeManager: No enemy prefab assigned!");
-            return;
+            EnemyPool pool = enemyPools[i];
+            for (int j = 0; j < pool.prewarm && inactiveEnemyCount < budget; j++)
+            {
+                HordeEnemy enemy = CreateEnemy(pool);
+                pool.inactive.Push(enemy);
+                pooledEnemies.Add(enemy);
+                inactiveEnemyCount++;
+            }
         }
+    }
 
-        int count = Mathf.Min(
-            Mathf.Max(0, prewarmCount),
-            Mathf.Max(0, maxPoolSize)
-        );
+    // Weighted across eligible prefabs, with NO allocations at spawn time.
+    // The per-prefab active cap is checked BEFORE rolling the weight.
+    private EnemyPool ChooseEnemyPool()
+    {
+        float sum = 0f;
+        bool projectileReady = rangedProjectilePool != null &&
+            rangedProjectilePool.isActiveAndEnabled && rangedProjectilePool.IsReady;
 
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < enemyPools.Count; i++)
         {
-            HordeEnemy enemy = CreateEnemy();
-
-            enemyPool.Push(enemy);
-            pooledEnemies.Add(enemy);
+            EnemyPool pool = enemyPools[i];
+            if (pool.weight <= 0f || pool.activeCount >= pool.maxActive ||
+                ElapsedSeconds < pool.unlockSeconds ||
+                (pool.isRanged && !projectileReady)) continue;
+            sum += pool.weight;
         }
+        if (sum <= 0f) return null;
+
+        float roll = Random.value * sum;
+        for (int i = 0; i < enemyPools.Count; i++)
+        {
+            EnemyPool pool = enemyPools[i];
+            if (pool.weight <= 0f || pool.activeCount >= pool.maxActive ||
+                ElapsedSeconds < pool.unlockSeconds ||
+                (pool.isRanged && !projectileReady)) continue;
+            roll -= pool.weight;
+            if (roll <= 0f) return pool;
+        }
+        return null;
     }
 
     public HordeEnemy SpawnEnemy(Vector3 position)
@@ -521,49 +625,57 @@ public sealed class HordeManager : MonoBehaviour
         return SpawnEnemy(position, Quaternion.identity);
     }
 
-    public HordeEnemy SpawnEnemy(
-        Vector3 position,
-        Quaternion rotation)
+    public HordeEnemy SpawnEnemy(Vector3 position, Quaternion rotation)
     {
-        if (!IsRunning || activeEnemies.Count >= runActiveLimit)
-            return null;
+        if (!IsRunning || activeEnemies.Count >= runActiveLimit) return null;
+        EnemyPool pool = ChooseEnemyPool();
+        return pool == null ? null : SpawnFromPool(pool, position, rotation);
+    }
 
-        if (enemyPrefab == null)
+    // Optional explicit-spawn API for events/boss introductions.
+    public HordeEnemy SpawnEnemyOfType(HordeEnemy prefab, Vector3 position, Quaternion rotation)
+    {
+        if (!IsRunning || activeEnemies.Count >= runActiveLimit) return null;
+        for (int i = 0; i < enemyPools.Count; i++)
         {
-            Debug.LogError("HordeManager: Missing enemy prefab.");
-            return null;
+            EnemyPool pool = enemyPools[i];
+            if (pool.prefab == prefab && pool.activeCount < pool.maxActive)
+            {
+                if (pool.isRanged && (rangedProjectilePool == null ||
+                    !rangedProjectilePool.isActiveAndEnabled || !rangedProjectilePool.IsReady))
+                    return null;
+                return SpawnFromPool(pool, position, rotation);
+            }
         }
+        return null;
+    }
 
+    private HordeEnemy SpawnFromPool(EnemyPool pool, Vector3 position, Quaternion rotation)
+    {
         HordeEnemy enemy = null;
-        // A pooled GameObject may have been destroyed by another system.
-        while (enemyPool.Count > 0 && enemy == null)
+        while (pool.inactive.Count > 0 && enemy == null)
         {
-            enemy = enemyPool.Pop();
-            pooledEnemies.Remove(enemy);
+            enemy = pool.inactive.Pop();
+            inactiveEnemyCount = Mathf.Max(0, inactiveEnemyCount - 1);
+            if (!object.ReferenceEquals(enemy, null)) pooledEnemies.Remove(enemy);
+            if (enemy == null && !object.ReferenceEquals(enemy, null))
+                owningPools.Remove(enemy); // externally destroyed pooled instance
         }
-        if (enemy == null)
-            enemy = CreateEnemy();
-
+        if (enemy == null) enemy = CreateEnemy(pool);
         enemy.transform.SetParent(null, true);
-
-        enemy.transform.SetPositionAndRotation(
-            position,
-            rotation
-        );
-
-        // Always assign dependencies and reset, including newly
-        // instantiated enemies that weren't previously pooled.
+        enemy.transform.SetPositionAndRotation(position, rotation);
         enemy.xpBlobPool = xpBlobPool;
         enemy.deathParticlePool = deathParticlePool;
-
         enemy.playerInventory = playerInventory;
-        HordeEnemyVariant variant = RollVariant(enemy, position);
+
+        // Type is fixed by prefab. Elite/EMP are optional spawn-time modifiers.
+        HordeEnemyVariant modifier = RollVariant(enemy, position);
         float health = EnemyHealthMultiplier;
         float speed = EnemySpeedMultiplier;
         float damage = EnemyDamageMultiplier;
         float scale = 1f;
         float motion = 1f;
-        if (variant == HordeEnemyVariant.Elite)
+        if (modifier == HordeEnemyVariant.Elite)
         {
             health *= Mathf.Max(1f, eliteHealthMultiplier);
             motion = Mathf.Max(1f, eliteSpeedMultiplier);
@@ -571,7 +683,7 @@ public sealed class HordeManager : MonoBehaviour
             damage *= Mathf.Max(1f, eliteDamageMultiplier);
             scale = Mathf.Max(1f, eliteScale);
         }
-        else if (variant == HordeEnemyVariant.EMP)
+        else if (modifier == HordeEnemyVariant.EMP)
         {
             health *= Mathf.Max(0.01f, empHealthMultiplier);
             motion = Mathf.Max(1f, empSpeedMultiplier);
@@ -579,10 +691,8 @@ public sealed class HordeManager : MonoBehaviour
             damage = 0f;
             nextEMPSpawnSeconds = ElapsedSeconds + Mathf.Max(0f, empSpawnCooldown);
         }
-        enemy.ResetForSpawn(health, speed, damage, variant, scale, motion);
-
+        enemy.ResetForSpawn(health, speed, damage, modifier, scale, motion);
         enemy.gameObject.SetActive(true);
-
         return enemy;
     }
 
@@ -593,11 +703,27 @@ public sealed class HordeManager : MonoBehaviour
 
     private HordeEnemyVariant RollVariant(HordeEnemy enemy, Vector3 spawnPosition)
     {
+        // Keep these mutually exclusive FOR NOW (as in the original game).
+        // Both rolls are independent of the prefab/archetype selection.
         if (enemy.CanBeEMP && CanSpawnEMP(spawnPosition) && RollChance(empSpawnChance))
             return HordeEnemyVariant.EMP;
         if (enemy.CanBeElite && RollChance(eliteSpawnChance))
             return HordeEnemyVariant.Elite;
         return HordeEnemyVariant.Normal;
+    }
+
+    internal Vector3 GetRangedAimPoint(Vector3 playerPosition, float targetHeight)
+    {
+        return rangedProjectilePool != null
+            ? rangedProjectilePool.GetAimPoint(playerPosition, targetHeight)
+            : playerPosition + Vector3.up * targetHeight;
+    }
+
+    internal bool FireRangedProjectile(Vector3 origin, Vector3 direction, float damage,
+        HordeEnemy shooter)
+    {
+        return rangedProjectilePool != null &&
+            rangedProjectilePool.TryFire(origin, direction, damage, shooter);
     }
 
     private bool CanSpawnEMP(Vector3 spawnPosition)
@@ -661,23 +787,21 @@ public sealed class HordeManager : MonoBehaviour
 
     public void DespawnEnemy(HordeEnemy enemy)
     {
-        if (enemy == null || pooledEnemies.Contains(enemy))
-            return;
+        if (enemy == null || pooledEnemies.Contains(enemy)) return;
 
         enemy.PrepareForPool();
         enemy.gameObject.SetActive(false);
-
-        // Don't let the inactive pool grow indefinitely.
-        if (enemyPool.Count >= maxPoolSize)
+        if (!owningPools.TryGetValue(enemy, out EnemyPool pool) ||
+            inactiveEnemyCount >= Mathf.Max(0, maxPoolSize))
         {
+            owningPools.Remove(enemy);
             Destroy(enemy.gameObject);
             return;
         }
-
         enemy.transform.SetParent(poolRoot, false);
-
-        enemyPool.Push(enemy);
+        pool.inactive.Push(enemy);
         pooledEnemies.Add(enemy);
+        inactiveEnemyCount++;
     }
 
     // ------------------------------------------------
@@ -742,8 +866,22 @@ public sealed class HordeManager : MonoBehaviour
             if (radio != null) empTargetCar = radio.carController;
         }
         if (empTargetCar == null) empTargetCar = FindObjectOfType<CarController>();
-        if (enemyPrefab != null && enemyPrefab.CanBeEMP && empTargetCar == null)
-            Debug.LogWarning("HordeManager: No car assigned for EMP enemies.", this);
+        if (empTargetCar == null)
+        {
+            for (int i = 0; i < enemyPools.Count; i++)
+                if (enemyPools[i].prefab.CanBeEMP)
+                {
+                    Debug.LogWarning("HordeManager: No car assigned for EMP enemies.", this);
+                    break;
+                }
+        }
+        for (int i = 0; i < enemyPools.Count; i++)
+            if (enemyPools[i].isRanged &&
+                (rangedProjectilePool == null || !rangedProjectilePool.IsReady))
+            {
+                Debug.LogWarning("HordeManager: Ranged type configured without a ready projectile pool.", this);
+                break;
+            }
         if (startAutomatically) BeginRun();
         else RefreshHUD(0f, 0f);
 
@@ -753,9 +891,9 @@ public sealed class HordeManager : MonoBehaviour
     public void BeginRun()
     {
         if (Instance != this || hasStarted || !isActiveAndEnabled) return;
-        if (player == null || enemyPrefab == null)
+        if (player == null || enemyPools.Count == 0)
         {
-            Debug.LogError("HordeManager: Assign the Player target and Enemy Prefab.", this);
+            Debug.LogError("HordeManager: Assign Player and at least one enemy prefab.", this);
             return;
         }
         if (playerStats == null)

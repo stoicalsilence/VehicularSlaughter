@@ -452,7 +452,51 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             PlayerReward(PlayerStatToModify.RadioAirstrikeDelay, "Airstrike Activation Delay", lowerIsBetter: true, minimumValue: 0.25f),
             PlayerReward(PlayerStatToModify.RadioAirstrikeScale, "Airstrike Size", maximumValue: 8f),
             PlayerReward(PlayerStatToModify.RadioAirstrikeDamage, "Airstrike Damage", maximumValue: 500f),
-            PlayerReward(PlayerStatToModify.RadioAirstrikeDamageMultiplier, "Airstrike Damage Multiplier", maximumValue: 5f)
+            PlayerReward(PlayerStatToModify.RadioAirstrikeDamageMultiplier, "Airstrike Damage Multiplier", maximumValue: 5f),
+
+            
+ // Grenades
+ PlayerReward(
+     PlayerStatToModify.GrenadeCapacity,
+     "Grenade Capacity",
+     MagnitudeMode.IntegerStep,
+     maximumValue: 8f,
+     weight: 0.45f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeRechargeSeconds,
+     "Grenade Recharge Time",
+     lowerIsBetter: true,
+     minimumValue: 5f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeDamage,
+     "Grenade Damage",
+     maximumValue: 500f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeExplosionRadius,
+     "Grenade Blast Radius",
+     maximumValue: 12f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeKnockbackForce,
+     "Grenade Knockback",
+     maximumValue: 35f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeThrowSpeed,
+     "Grenade Throw Velocity",
+     maximumValue: 30f,
+     weight: 0.5f),
+
+ PlayerReward(
+     PlayerStatToModify.GrenadeFuseSeconds,
+     "Grenade Fuse Time",
+     lowerIsBetter: true,
+     minimumValue: 0.5f,
+     weight: 0.5f),
+
         };
     }
 
