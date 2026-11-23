@@ -92029,6 +92029,7 @@ GameObject:
   - component: {fileID: 2236483402978118960}
   - component: {fileID: 8953977757897862240}
   - component: {fileID: 8840989504797663051}
+  - component: {fileID: 8659873973260957855}
   m_Layer: 7
   m_Name: ChunkyBot
   m_TagString: Untagged
@@ -92178,6 +92179,36 @@ MonoBehaviour:
   carRollAngularVelocityChange: 1.6
   carCooldown: 2.75
   eliteLaunchMultiplier: 1.3
+--- !u!114 &8659873973260957855
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2236483402978118961}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d402a3a007fa18b429a44f7f65f20bdb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  duration: 0.36
+  eliteDurationMultiplier: 1.35
+  useFlyingEdgeColor: 1
+  flyingEdge: {r: 0.26, g: 0.87, b: 1, a: 1}
+  flyingDurationMultiplier: 1.1
+  flyingGhostFallSpeed: 1.2
+  noiseScale: 7
+  glowingEdgeWidth: 0.09
+  edgeBrightness: 3
+  upwardDissolveBias: 0.28
+  heightScale: 0.65
+  normalEdge: {r: 1, g: 0.3, b: 0.055, a: 1}
+  eliteEdge: {r: 1, g: 0.76, b: 0.12, a: 1}
+  empEdge: {r: 0.05, g: 0.8, b: 1, a: 1}
+  empBodyTint: {r: 0.25, g: 0.75, b: 1, a: 1}
+  replaceRegularDeathParticles: 0
+  dissolveEMPEnemies: 0
+  excludeRenderers: []
 --- !u!1 &2924540584352281033
 GameObject:
   m_ObjectHideFlags: 0

@@ -1223,6 +1223,7 @@ GameObject:
   - component: {fileID: 190218413371079958}
   - component: {fileID: 5731428171018896389}
   - component: {fileID: 132191892235288306}
+  - component: {fileID: 6450055379138678301}
   m_Layer: 7
   m_Name: HarrierDrone
   m_TagString: Untagged
@@ -1375,10 +1376,47 @@ MonoBehaviour:
   windupIndicator: {fileID: 6883075825174351798}
   windupSound: {fileID: 0}
   diveSound: {fileID: 0}
+  crashParticles: {fileID: 0}
   audioVolume: 0.55
-  maximumBankDegrees: 18
+  facingResponsiveness: 10
+  maximumDivePitchDegrees: 18
+  diveTrail: {fileID: 0}
+  diveTrail2: {fileID: 0}
+  defaultLayerImpactSound: {fileID: 0}
+  impactSoundVolume: 0.8
+  impactSoundCooldown: 0.2
   rotorPivots: []
   rotorDegreesPerSecond: 1300
+--- !u!114 &6450055379138678301
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8832158848455140592}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d402a3a007fa18b429a44f7f65f20bdb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  duration: 0.36
+  eliteDurationMultiplier: 1.35
+  useFlyingEdgeColor: 1
+  flyingEdge: {r: 0.26, g: 0.87, b: 1, a: 1}
+  flyingDurationMultiplier: 1.1
+  flyingGhostFallSpeed: 1.2
+  noiseScale: 7
+  glowingEdgeWidth: 0.09
+  edgeBrightness: 3
+  upwardDissolveBias: 0.28
+  heightScale: 0.65
+  normalEdge: {r: 1, g: 0.3, b: 0.055, a: 1}
+  eliteEdge: {r: 1, g: 0.76, b: 0.12, a: 1}
+  empEdge: {r: 0.05, g: 0.8, b: 1, a: 1}
+  empBodyTint: {r: 0.25, g: 0.75, b: 1, a: 1}
+  replaceRegularDeathParticles: 1
+  dissolveEMPEnemies: 0
+  excludeRenderers: []
 --- !u!1 &9206820997291968227
 GameObject:
   m_ObjectHideFlags: 0

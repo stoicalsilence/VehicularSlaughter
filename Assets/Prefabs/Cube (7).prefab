@@ -15,6 +15,8 @@ GameObject:
   - component: {fileID: 6177906088761767682}
   - component: {fileID: 6177906088761767683}
   - component: {fileID: 6177906088761767693}
+  - component: {fileID: 5343851124476840539}
+  - component: {fileID: 509674500392741011}
   m_Layer: 7
   m_Name: Cube (7)
   m_TagString: Untagged
@@ -347,6 +349,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2559e5406ccdb1429bfe551a1793c9c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  allowEliteVariant: 1
+  allowEmpVariant: 0
+  empBlueMaterial: {fileID: 0}
   moveSpeed: 3.5
   acceleration: 18
   turnSpeed: 540
@@ -365,6 +370,73 @@ MonoBehaviour:
   climbAcceleration: 20
   wallStickSpeed: 1.5
   minimumClimbUpDot: 0.45
+  xpBlobPool: {fileID: 0}
+  xpDropValue: 10
+  maxHealth: 30
+  contactDamage: 10
+  hitFlashDuration: 0.08
+  hitFlashMaterial: {fileID: 0}
+  flashEMPEnemies: 1
+  deathParticlePool: {fileID: 0}
+  playerInventory: {fileID: 0}
+  deathSound: {fileID: 0}
+  deathSoundVolume: 1
+  hitSound: {fileID: 0}
+  altHitSound: {fileID: 0}
+  hitSoundVolume: 0.8
+  knockbackResistancePercent: 0
+  knockbackDuration: 0.25
+  canBeRunOver: 1
+  vehicleDamageMultiplier: 1
+  vehicleKnockbackMultiplier: 1
+  vehicleImpactCarDamageMultiplier: 1
+  vehicleContactDamageMultiplier: 1
+  vehicleHitCooldown: 0.4
+  bakedAnimator: {fileID: 0}
+--- !u!136 &5343851124476840539
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6177906088761767684}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 0
+  m_Enabled: 1
+  m_Radius: 0.5
+  m_Height: 1
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &509674500392741011
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6177906088761767684}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d402a3a007fa18b429a44f7f65f20bdb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  duration: 0.36
+  eliteDurationMultiplier: 1.35
+  useFlyingEdgeColor: 1
+  flyingEdge: {r: 0.26, g: 0.87, b: 1, a: 1}
+  flyingDurationMultiplier: 1.1
+  flyingGhostFallSpeed: 1.2
+  noiseScale: 7
+  glowingEdgeWidth: 0.09
+  edgeBrightness: 3
+  upwardDissolveBias: 0.28
+  heightScale: 0.65
+  normalEdge: {r: 1, g: 0.3, b: 0.055, a: 1}
+  eliteEdge: {r: 1, g: 0.76, b: 0.12, a: 1}
+  empEdge: {r: 0.05, g: 0.8, b: 1, a: 1}
+  empBodyTint: {r: 0.25, g: 0.75, b: 1, a: 1}
+  replaceRegularDeathParticles: 1
+  dissolveEMPEnemies: 0
+  excludeRenderers: []
 --- !u!1 &6177906090123421522
 GameObject:
   m_ObjectHideFlags: 0

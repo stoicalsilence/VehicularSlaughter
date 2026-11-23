@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 7154951635562750289}
   - component: {fileID: 7154951635562750288}
   - component: {fileID: 7154951635562750295}
+  - component: {fileID: 3036928266080323089}
   m_Layer: 7
   m_Name: CapsuleTestEnemy
   m_TagString: Untagged
@@ -126,6 +127,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2559e5406ccdb1429bfe551a1793c9c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  allowEliteVariant: 1
+  allowEmpVariant: 0
+  empBlueMaterial: {fileID: 0}
   moveSpeed: 4.5
   acceleration: 18
   turnSpeed: 720
@@ -149,7 +153,10 @@ MonoBehaviour:
   maxHealth: 30
   contactDamage: 5
   hitFlashDuration: 0.08
+  hitFlashMaterial: {fileID: 0}
+  flashEMPEnemies: 1
   deathParticlePool: {fileID: 0}
+  playerInventory: {fileID: 0}
   deathSound: {fileID: 8300000, guid: f29ed22f744dd7442be3153371301287, type: 3}
   deathSoundVolume: 1
   hitSound: {fileID: 8300000, guid: 46e18713a5ce34240b85e332a3b618e8, type: 3}
@@ -164,3 +171,33 @@ MonoBehaviour:
   vehicleContactDamageMultiplier: 1
   vehicleHitCooldown: 0.1
   bakedAnimator: {fileID: 0}
+--- !u!114 &3036928266080323089
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7154951635562750294}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d402a3a007fa18b429a44f7f65f20bdb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  duration: 0.36
+  eliteDurationMultiplier: 1.35
+  useFlyingEdgeColor: 1
+  flyingEdge: {r: 0.26, g: 0.87, b: 1, a: 1}
+  flyingDurationMultiplier: 1.1
+  flyingGhostFallSpeed: 1.2
+  noiseScale: 7
+  glowingEdgeWidth: 0.09
+  edgeBrightness: 3
+  upwardDissolveBias: 0.28
+  heightScale: 0.65
+  normalEdge: {r: 1, g: 0.3, b: 0.055, a: 1}
+  eliteEdge: {r: 1, g: 0.76, b: 0.12, a: 1}
+  empEdge: {r: 0.05, g: 0.8, b: 1, a: 1}
+  empBodyTint: {r: 0.25, g: 0.75, b: 1, a: 1}
+  replaceRegularDeathParticles: 1
+  dissolveEMPEnemies: 0
+  excludeRenderers: []
