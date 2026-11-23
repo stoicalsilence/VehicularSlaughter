@@ -167,6 +167,10 @@ public class CarController : MonoBehaviour
     [Header("VEHICLE DURABILITY / ENEMY IMPACTS")]
     [SerializeField] private bool enableVehicleImpactSystem = true;
 
+    public ParticleSystem severeDamageParticleEffect;
+    public AudioClip[] severeDamageSounds;
+    public bool severeDamageActive;
+
     private float maxVehicleHealth => carStats.maxVehicleHealth;
 
     private float minimumRunOverSpeedKmh => carStats.minimumRunOverSpeedKmh;
@@ -1086,7 +1090,16 @@ public class CarController : MonoBehaviour
                 carEngineSound.Stop();
             }
 
-            if (tireScreechSound != null && tireScreechSound.isPlaying)
+            if (severeDamageParticleEffect.isPlaying)
+            {
+                if (currentVehicleHealth / carStats.maxVehicleHealth > 0.3f)
+                {
+                    severeDamageActive = false;
+                    severeDamageParticleEffect.Stop();
+                }
+            }
+
+                if (tireScreechSound != null && tireScreechSound.isPlaying)
             {
                 tireScreechSound.Stop();
             }
@@ -1992,6 +2005,16 @@ public class CarController : MonoBehaviour
         {
             damageParticles.Stop();
             damageParticles.Play();
+        }
+
+        if (!severeDamageActive)
+        {
+            if(currentVehicleHealth / carStats.maxVehicleHealth <= 0.3f)
+            {
+                severeDamageActive = true;
+                severeDamageParticleEffect.Play();
+                carEngineSound.PlayOneShot(severeDamageSounds[UnityEngine.Random.Range(0, severeDamageSounds.Length)]);
+            }
         }
     }
 
