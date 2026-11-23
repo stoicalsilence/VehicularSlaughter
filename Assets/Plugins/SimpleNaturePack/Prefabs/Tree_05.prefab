@@ -93,6 +93,7 @@ GameObject:
   - component: {fileID: 3981920650935114268}
   - component: {fileID: 8698415174464191407}
   - component: {fileID: 503707795537676108}
+  - component: {fileID: 5199095792398820318}
   m_Layer: 0
   m_Name: Tree_05_LOD0
   m_TagString: Untagged
@@ -176,6 +177,25 @@ BoxCollider:
   serializedVersion: 2
   m_Size: {x: 1.5, y: 3.671553, z: 1.5}
   m_Center: {x: 0, y: 1.8255256, z: 0}
+--- !u!114 &5199095792398820318
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5089877098680381616}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a9d9c8499d75d045838a1796512935a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  visualRoot: {fileID: 5204263869384690163}
+  hologramMaterial: {fileID: 2100000, guid: 0be635e8ecd7c8a44b0e52641e30ddea, type: 2}
+  effectDuration: 1
+  fadeInDuration: 0.08
+  fadeOutDuration: 0.8
+  retriggerCooldown: 0.3
+  maxMeshRenderers: 24
 --- !u!1 &9069115365609291303
 GameObject:
   m_ObjectHideFlags: 0

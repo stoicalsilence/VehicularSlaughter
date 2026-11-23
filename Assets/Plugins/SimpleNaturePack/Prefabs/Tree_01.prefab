@@ -91,6 +91,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2222111361405018444}
   - component: {fileID: 230860312991076117}
+  - component: {fileID: 3472485144469761231}
   m_Layer: 0
   m_Name: Tree_01
   m_TagString: Untagged
@@ -137,6 +138,25 @@ LODGroup:
     renderers:
     - renderer: {fileID: 804206825550485546}
   m_Enabled: 1
+--- !u!114 &3472485144469761231
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2222111361404534124}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a9d9c8499d75d045838a1796512935a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  visualRoot: {fileID: 0}
+  hologramMaterial: {fileID: 0}
+  effectDuration: 1
+  fadeInDuration: 0.08
+  fadeOutDuration: 0.8
+  retriggerCooldown: 0.3
+  maxMeshRenderers: 24
 --- !u!1 &7155140798900432468
 GameObject:
   m_ObjectHideFlags: 0
@@ -149,6 +169,7 @@ GameObject:
   - component: {fileID: 1255735844759439003}
   - component: {fileID: 5708200766736619226}
   - component: {fileID: 6594968128082907717}
+  - component: {fileID: 2213807243696625424}
   m_Layer: 0
   m_Name: Tree_01_LOD0
   m_TagString: Untagged
@@ -232,3 +253,22 @@ BoxCollider:
   serializedVersion: 2
   m_Size: {x: 1, y: 5.5617986, z: 1}
   m_Center: {x: 0, y: 2.7809107, z: 0}
+--- !u!114 &2213807243696625424
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7155140798900432468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a9d9c8499d75d045838a1796512935a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  visualRoot: {fileID: 6391492409923566826}
+  hologramMaterial: {fileID: 2100000, guid: 0be635e8ecd7c8a44b0e52641e30ddea, type: 2}
+  effectDuration: 2.5
+  fadeInDuration: 0.08
+  fadeOutDuration: 0.8
+  retriggerCooldown: 0.3
+  maxMeshRenderers: 24

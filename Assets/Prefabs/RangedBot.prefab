@@ -187663,7 +187663,7 @@ MonoBehaviour:
   minShotCooldown: 1.8
   maxShotCooldown: 2.9
   shotSpreadDegrees: 1.25
-  baseProjectileDamage: 8
+  baseProjectileDamage: 5
   targetHeight: 0.3
   muzzle: {fileID: 8379000302343794215}
   chargeIndicator: {fileID: 2368104313021913042}

@@ -248,6 +248,11 @@ public class TerrainGenerator : MonoBehaviour
         int poiPlaced = SpawnPointsOfInterest(placementRandom);
         int treesPlaced = SpawnTrees(placementRandom);
 
+        // Rebuild only nearby, pooled grass meshes after the heightmap/textures change.
+        MuckGrass muckGrass = GetComponent<MuckGrass>();
+        if (muckGrass != null)
+            muckGrass.RefreshGrass();
+
         Debug.Log(
             "TerrainGenerator: Generated terrain with seed " + seed + ". Placed " +
             poiPlaced + " POI(s) and " + treesPlaced + " tree(s).",
