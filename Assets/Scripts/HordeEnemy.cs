@@ -18,15 +18,17 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     public bool IsElite => Variant == HordeEnemyVariant.Elite;
     public bool IsEMP => Variant == HordeEnemyVariant.EMP;
     public bool CanBeElite => allowEliteVariant;
-    public bool CanBeEMP => allowEmpVariant && empBlueMaterial != null;
+    public bool CanBeEMP => allowEmpVariant && empBlueMaterial != null && !IsFlying;
     // Combat behavior is a prefab component, NOT a mutually exclusive variant.
     public bool IsRanged => rangedAttack != null && rangedAttack.enabled;
+    public bool IsFlying => flyingAttack != null && flyingAttack.enabled;
     // Chunky is also a prefab component. Only collision/contact hooks call it.
     public HordeChunkyImpact ChunkyImpact { get; private set; }
     // Prevent recycled enemies from inheriting ownership of a projectile in flight.
     public uint SpawnGeneration { get; private set; }
 
     private HordeRangedAttack rangedAttack;
+    private HordeFlyingAttack flyingAttack;
 
     private Vector3 baseLocalScale;
     private CollisionDetectionMode baseCollisionMode;
@@ -209,7 +211,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
     {
         get
         {
-            if (isDead || !isActiveAndEnabled || isClimbing ||
+            if (isDead || !isActiveAndEnabled || isClimbing || IsFlying ||
                 knockbackTimer > 0f || rb == null)
                 return false;
 
@@ -235,6 +237,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         baseLocalScale = transform.localScale;
         baseCollisionMode = rb.collisionDetectionMode;
         rangedAttack = GetComponent<HordeRangedAttack>();
+        flyingAttack = GetComponent<HordeFlyingAttack>();
         ChunkyImpact = GetComponent<HordeChunkyImpact>();
         CacheVariantRenderers();
 
@@ -257,7 +260,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         isClimbing = false;
         nextVehicleHitTime = 0f;
 
-        rb.useGravity = defaultGravity;
+        rb.useGravity = IsFlying ? false : defaultGravity;
 
         Velocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
@@ -321,6 +324,14 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         Vector3 horizontalDirection =
             Vector3.ProjectOnPlane(toTarget, Vector3.up);
+
+        // Flying archetypes bypass ground/chase/climb and keep their own attack pattern.
+        // The common HordeEnemy still owns health, pooling, and knockback.
+        if (IsFlying && !IsEMP)
+        {
+            flyingAttack.ManagedTick(dt, targetPosition);
+            return;
+        }
 
         // The optional ranged component is deliberately ticked by this manager-owned
         // simulation, never by its own Update/FixedUpdate. EMP overrides shooting.
@@ -617,7 +628,7 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
         isClimbing = false;
 
-        rb.useGravity = defaultGravity;
+        rb.useGravity = IsFlying ? false : defaultGravity;
 
         Vector3 velocity = Velocity;
 
@@ -668,11 +679,13 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         simulationTimer = 0f;
         if (rangedAttack != null)
             rangedAttack.ResetForPool();
+        if (flyingAttack != null)
+            flyingAttack.ResetForPool();
 
         if (rb == null)
             return;
 
-        rb.useGravity = defaultGravity;
+        rb.useGravity = IsFlying ? false : defaultGravity;
         rb.velocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
 
@@ -716,7 +729,9 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         HealthMultiplier = SanitizeMultiplier(healthMultiplier);
         SpeedMultiplier = SanitizeMultiplier(speedMultiplier);
         DamageMultiplier = SanitizeMultiplier(damageMultiplier);
-        contactDamage = IsRanged && !IsEMP ? 0f : Mathf.Max(0f, baseContactDamage) * DamageMultiplier;
+        // A drone only hurts targets on a committed dive, never by passive contact.
+        contactDamage = (IsRanged || IsFlying) && !IsEMP
+            ? 0f : Mathf.Max(0f, baseContactDamage) * DamageMultiplier;
         currentHealth = MaxHealth;
         isDead = false;
 
@@ -724,6 +739,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         unchecked { SpawnGeneration++; }
         if (rangedAttack != null)
             rangedAttack.ResetForSpawn(this);
+        if (flyingAttack != null)
+            flyingAttack.ResetForSpawn(this);
 
         simulationTimer = Random.Range(0f, 0.2f);
     }
@@ -852,6 +869,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         knockbackTimer = knockbackDuration;
         if (rangedAttack != null)
             rangedAttack.CancelForKnockback();
+        if (flyingAttack != null)
+            flyingAttack.CancelForKnockback();
     }
 
     private void PlayHitSound()
@@ -949,6 +968,8 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
         {
             // Do not flash a ranged telegraph material with the enemy's body.
             if (rangedAttack != null && rangedAttack.IsChargeVisual(renderer.transform))
+                continue;
+            if (flyingAttack != null && flyingAttack.IsWarningVisual(renderer.transform))
                 continue;
             if (!(renderer is MeshRenderer) && !(renderer is SkinnedMeshRenderer))
                 continue;
@@ -1063,7 +1084,12 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
 
     private void DropXP()
     {
-        if (xpBlobPool != null) xpBlobPool.Spawn(transform.position, xpDropValue);
+        if (xpBlobPool != null)
+        {
+            Vector3 position = IsFlying
+                ? flyingAttack.GetGroundedXPPosition() : transform.position;
+            xpBlobPool.Spawn(position, xpDropValue);
+        }
     }
 
     public void ReceiveThornsDamage(float damage)
