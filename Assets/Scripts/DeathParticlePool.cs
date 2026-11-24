@@ -18,7 +18,7 @@ public sealed class DeathParticlePool : MonoBehaviour
         new List<PooledParticleEffect>();
 
     private Transform poolRoot;
-
+    private Vector3 originalEffectScale;
     public int PooledCount => pool.Count;
     public int ActiveCount => activeEffects.Count;
 
@@ -34,7 +34,7 @@ public sealed class DeathParticlePool : MonoBehaviour
             enabled = false;
             return;
         }
-
+        originalEffectScale = prefab.transform.localScale;
         CreatePoolRoot();
         PrewarmPool();
     }
@@ -81,12 +81,19 @@ public sealed class DeathParticlePool : MonoBehaviour
     // SPAWNING
     // ------------------------------------------------
 
+
     public void Play(Vector3 position)
     {
-        Play(position, Quaternion.identity);
+        Play(position, Quaternion.identity, 1f);
     }
 
     public void Play(Vector3 position, Quaternion rotation)
+    {
+        Play(position, rotation, 1f);
+    }
+
+    // New overload supporting scaled death effects.
+    public void Play(Vector3 position, Quaternion rotation, float scale)
     {
         PooledParticleEffect effect;
 
@@ -103,6 +110,10 @@ public sealed class DeathParticlePool : MonoBehaviour
 
         effect.transform.SetParent(transform, false);
 
+        // Reset scale every time an effect is reused.
+        effect.transform.localScale =
+            originalEffectScale * Mathf.Max(0.01f, scale);
+
         effect.transform.SetPositionAndRotation(
             position,
             rotation
@@ -111,9 +122,9 @@ public sealed class DeathParticlePool : MonoBehaviour
         activeEffects.Add(effect);
 
         effect.gameObject.SetActive(true);
-
         effect.PlayEffect();
     }
+
 
     // ------------------------------------------------
     // CENTRALIZED LIFETIME MANAGEMENT

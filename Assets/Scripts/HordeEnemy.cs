@@ -1051,7 +1051,15 @@ public sealed class HordeEnemy : MonoBehaviour, ITurretDamageable
             // Regular pooled death particles.
             if (deathParticlePool != null)
             {
-                deathParticlePool.Play(deathPosition);
+                float particleScale = IsElite
+                    ? 2f
+                    : 1f;
+
+                deathParticlePool.Play(
+                    deathPosition,
+                    Quaternion.identity,
+                    particleScale
+                );
             }
 
             // Regular death sound.

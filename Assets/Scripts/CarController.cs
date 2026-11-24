@@ -317,6 +317,10 @@ public class CarController : MonoBehaviour
     [SerializeField, Min(0.01f)] private float parkingLockSpeed = 0.3f;
     [SerializeField, Tooltip("Played when the parking brake is engaged or released.")]
     private AudioClip parkingBrakeToggleSound;
+    [SerializeField, Min(0f)]
+    private float parkingBrakeToggleCooldown = 1f;
+
+    private float nextParkingBrakeToggleTime;
 
     private bool parkingBrakeEngaged;
     private bool parkingPositionLocked;
@@ -336,8 +340,11 @@ public class CarController : MonoBehaviour
 
     public void SetParkingBrake(bool engaged)
     {
+        if (Time.time < nextParkingBrakeToggleTime) return;
+
         if (!HasPlayerInDriverSeat() || parkingBrakeEngaged == engaged || vehicleWrecked) return;
         parkingBrakeEngaged = engaged;
+        nextParkingBrakeToggleTime = Time.time + parkingBrakeToggleCooldown;
         if (parkingBrakeToggleSound != null)
             AudioManager.Play2D(parkingBrakeToggleSound, 1f);
 
