@@ -253,6 +253,11 @@ public class TerrainGenerator : MonoBehaviour
         if (muckGrass != null)
             muckGrass.RefreshGrass();
 
+        // Generate decorative clouds after the terrain and its objects are ready.
+        CloudSpawner cloudSpawner = GetComponent<CloudSpawner>();
+        if (cloudSpawner != null)
+            cloudSpawner.GenerateClouds(terrain, seed);
+
         Debug.Log(
             "TerrainGenerator: Generated terrain with seed " + seed + ". Placed " +
             poiPlaced + " POI(s) and " + treesPlaced + " tree(s).",

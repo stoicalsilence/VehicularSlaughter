@@ -1,4 +1,3 @@
-
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -18,6 +17,10 @@ public class EmissionLerp : MonoBehaviour
     [Tooltip("Time in seconds to go from Min to Max.")]
     [SerializeField] private float pulseDuration = 2f;
 
+    [Header("Fog")]
+    [Tooltip("Makes the material ignore fog if supported by its shader.")]
+    [SerializeField] private bool ignoreFog = false;
+
     [Header("Proximity Transparency")]
     [SerializeField] private bool enableProximityTransparency = false;
     private Transform player;
@@ -36,7 +39,44 @@ public class EmissionLerp : MonoBehaviour
 
         material.EnableKeyword("_EMISSION");
 
-        player = FindObjectOfType<PlayerGun>().gameObject.transform;
+        if (enableProximityTransparency)
+        {
+            PlayerGun playerGun = FindObjectOfType<PlayerGun>();
+
+            if (playerGun != null)
+                player = playerGun.transform;
+        }
+
+        if (ignoreFog)
+            ApplyIgnoreFog();
+    }
+
+    private void ApplyIgnoreFog()
+    {
+        bool supported = false;
+
+        // Custom shader fog support
+        if (material.HasProperty("_IgnoreFog"))
+        {
+            material.SetFloat("_IgnoreFog", 1f);
+            supported = true;
+        }
+
+        // HDRP transparent material fog support
+        if (material.HasProperty("_EnableFogOnTransparent"))
+        {
+            material.SetFloat("_EnableFogOnTransparent", 0f);
+            material.DisableKeyword("_ENABLE_FOG_ON_TRANSPARENT");
+            supported = true;
+        }
+
+        if (!supported)
+        {
+            Debug.LogWarning(
+                "EmissionLerp: Shader does not support Ignore Fog.",
+                this
+            );
+        }
     }
 
     private void Update()
@@ -77,7 +117,9 @@ public class EmissionLerp : MonoBehaviour
             return;
         }
 
-        float t = Mathf.PingPong(Time.time / pulseDuration, 1f);
+        float t = Mathf.PingPong(
+            Time.time / Mathf.Max(pulseDuration, 0.001f), 1f
+        );
 
         float intensity = Mathf.Lerp(minIntensity, maxIntensity, t);
 

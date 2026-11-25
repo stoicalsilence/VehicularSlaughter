@@ -63,7 +63,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: f1b9c547408e74749b4fd3465cae9317, type: 2}
+  - {fileID: 2100000, guid: f2a94b8cbd5ba8b40af6f3b324f54d87, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -117,6 +117,7 @@ MonoBehaviour:
   minIntensity: 0
   maxIntensity: 1.5
   pulseDuration: 3
+  ignoreFog: 1
   enableProximityTransparency: 1
   fadeDistance: 25
   fadeSpeed: 2.5

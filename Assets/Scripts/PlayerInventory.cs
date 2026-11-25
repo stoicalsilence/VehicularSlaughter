@@ -1466,7 +1466,40 @@ public sealed class PlayerInventory : MonoBehaviour
         }
 
         if (descriptionText != null)
-            descriptionText.text = offeredItem.description;
+        {
+            string description = offeredItem.description;
+
+            if (offeredItem.displayName == "Coin of Quaternius" &&
+                playerStats != null)
+            {
+                float currentLuck = playerStats.itemLuck;
+                float futureLuck = currentLuck + 3f;
+
+                if (TryGetRarityDropChance(
+                        ItemRarity.Epic, currentLuck, out float epicBefore) &&
+                    TryGetRarityDropChance(
+                        ItemRarity.Epic, futureLuck, out float epicAfter))
+                {
+                    description +=
+                        "<color=#BFA0FF>Epic Drops:</color> " +
+                        $"{epicBefore:0.0}% -> " +
+                        $"<color=#7DFF91>{epicAfter:0.0}%</color>";
+                }
+
+                if (TryGetRarityDropChance(
+                        ItemRarity.Legendary, currentLuck, out float legendaryBefore) &&
+                    TryGetRarityDropChance(
+                        ItemRarity.Legendary, futureLuck, out float legendaryAfter))
+                {
+                    description +=
+                        "\n<color=#FFCA55>Legendary Drops:</color> " +
+                        $"{legendaryBefore:0.0}% -> " +
+                        $"<color=#7DFF91>{legendaryAfter:0.0}%</color>";
+                }
+            }
+
+            descriptionText.text = description;
+        }
 
         if (banishCountText != null)
         {

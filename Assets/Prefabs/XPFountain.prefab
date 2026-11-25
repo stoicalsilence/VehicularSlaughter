@@ -116,6 +116,7 @@ MonoBehaviour:
   minIntensity: 0
   maxIntensity: 1.5
   pulseDuration: 3
+  ignoreFog: 1
   enableProximityTransparency: 0
   fadeDistance: 3
   fadeSpeed: 5

@@ -231,9 +231,16 @@ public class TurretGun : MonoBehaviour
     private Sequence reloadSequence;
     private float reloadBaseDuration;
 
+    // Read-only HUD access; the existing CurrentAmmo/MagazineSize/IsReloading remain intact.
+
+    public bool AmmoInitialized { get; private set; }
+    public float ReloadProgress => isReloading && reloadSequence != null && reloadSequence.IsActive()
+        ? Mathf.Clamp01(reloadSequence.ElapsedPercentage(false)) : 0f;
+
+
 
     public int CurrentAmmo => currentAmmo;
-    public int MagazineSize => magazineSize;
+    public int MagazineSize => carStats != null ? magazineSize : 0;
     public bool IsReloading => isReloading;
     public Transform CurrentTarget => currentTarget;
     public bool HasMarkedTarget => markedTarget != null;
@@ -258,6 +265,7 @@ public class TurretGun : MonoBehaviour
 
         owningCar = GetComponentInParent<CarController>();
         currentAmmo = magazineSize;
+        AmmoInitialized = true;
         SetMarkedIndicatorActive(false);
 
         if (muzzleFlash != null)

@@ -1,0 +1,8 @@
+newmtl Front
+Kd 1 1 1
+map_Kd ../textures/blank.png
+newmtl Back
+Kd 1 1 1
+map_Kd ../textures/back.png
+newmtl Edge
+Kd 0.28 0.27 0.22

@@ -8,7 +8,7 @@ public sealed class CarBatteryMeter : MonoBehaviour
     [Header("References")]
     public CarController car;
 
-    public Image batteryMeterImage;
+    public RawImage batteryMeterImage;
     public TextMeshProUGUI batteryHealthText;
 
     [Header("Battery Colors")]

@@ -17,7 +17,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &4175922834104611115
 Transform:
   m_ObjectHideFlags: 0
@@ -94,6 +94,8 @@ GameObject:
   - component: {fileID: 8258636257821695437}
   - component: {fileID: 5857664854893004599}
   - component: {fileID: 9129190508914378581}
+  - component: {fileID: 8845361252457109707}
+  - component: {fileID: 1579473041691820904}
   m_Layer: 0
   m_Name: Tree_03_LOD0
   m_TagString: Untagged
@@ -175,8 +177,8 @@ BoxCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Size: {x: 1, y: 4.950701, z: 1}
-  m_Center: {x: 0, y: 2.4756033, z: 0}
+  m_Size: {x: 0.82580346, y: 4.950701, z: 0.82034725}
+  m_Center: {x: 0.020635128, y: 2.4756033, z: -0.008130414}
 --- !u!114 &9129190508914378581
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -196,6 +198,55 @@ MonoBehaviour:
   fadeOutDuration: 0.8
   retriggerCooldown: 0.3
   maxMeshRenderers: 24
+--- !u!114 &8845361252457109707
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6791950039092535430}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 42b740f0d3cc40849995b5fe4c09f724, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  minimumImpactSpeedKmh: 80
+  minimumImpactImpulse: 500
+  impactLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  impactVelocityBoost: 5
+  upwardVelocityBoost: 1.5
+  angularVelocityBoost: 3
+  mass: 150
+  impulseMultiplier: 0.5
+  maximumTransferredImpulse: 2000
+  optionalSound: {fileID: 8300000, guid: e773a7e7882945143b0e64641c357e68, type: 3}
+--- !u!114 &1579473041691820904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6791950039092535430}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8989f35df14032b4b840a7e14f2265d5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  impactSounds:
+  - {fileID: 8300000, guid: d925775398aeadd4ca9b5253921c4a4b, type: 3}
+  - {fileID: 8300000, guid: 9f1195f439904e545a8b7700c9b6d2fb, type: 3}
+  - {fileID: 8300000, guid: 5b7a40355b8fbe84da4613113b8069e9, type: 3}
+  - {fileID: 8300000, guid: 7ab7e48c755bec5479b7699b62250807, type: 3}
+  - {fileID: 8300000, guid: e76528ff3ee199c45a5e429ac21bb498, type: 3}
+  - {fileID: 8300000, guid: b6b65c9d988f46944ae696b571671bd1, type: 3}
+  pitchRange: {x: 0.85, y: 1.15}
+  minImpactSpeed: 1.5
+  maxImpactSpeed: 12
+  minVolume: 0.8
+  maxVolume: 1
+  impactCooldown: 0.15
 --- !u!1 &6941765000743290380
 GameObject:
   m_ObjectHideFlags: 0
@@ -222,7 +273,7 @@ Transform:
   m_GameObject: {fileID: 6941765000743290380}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1.4, y: 1.4, z: 1.4}
   m_Children:
   - {fileID: 4376338348109310597}
   - {fileID: 4175922834104611115}
@@ -251,4 +302,4 @@ LODGroup:
     fadeTransitionWidth: 0
     renderers:
     - renderer: {fileID: 287222047877186625}
-  m_Enabled: 1
+  m_Enabled: 0

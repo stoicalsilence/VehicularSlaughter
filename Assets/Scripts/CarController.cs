@@ -13,7 +13,6 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 public class CarController : MonoBehaviour
 {
@@ -93,9 +92,9 @@ public class CarController : MonoBehaviour
     [Space(20)]
     //[Header("UI")]
     [Space(10)]
-    //The following variable lets you to set up a UI text to display the speed of your car.
+    // Optional standalone TMP output. Leave disabled when using SpeedometerMeter.
     public bool useUI = false;
-    public Text carSpeedText; // Used to store the UI object that is going to show the speed of the car.
+    public TextMeshProUGUI carSpeedText;
     public GameObject parkBrakeIcon;
 
     //SOUNDS
@@ -173,6 +172,10 @@ public class CarController : MonoBehaviour
 
     private float maxVehicleHealth => carStats.maxVehicleHealth;
 
+    // Read-only HUD access to the authoritative stats and initialization state.
+    public float MaxVehicleHealth => carStats != null ? maxVehicleHealth : 0f;
+    public bool IsVehicleHealthInitialized => vehicleHealthInitialized;
+
     private float minimumRunOverSpeedKmh => carStats.minimumRunOverSpeedKmh;
 
     private float maximumImpactSpeedKmh => carStats.maximumImpactSpeedKmh;
@@ -228,7 +231,8 @@ public class CarController : MonoBehaviour
     private bool turretWasEnabled;
     private bool collectorWasEnabled;
 
-    public TextMeshProUGUI lastDamageTakenText;
+    // Legacy scene reference only; no damage-number updates are performed.
+    [HideInInspector] public TextMeshProUGUI lastDamageTakenText;
     private float enemyContactDamageCooldown => carStats.enemyContactDamageCooldown;
 
     private float vehicleThornsDamage => carStats.vehicleThornsDamage;
@@ -263,6 +267,8 @@ public class CarController : MonoBehaviour
 
     // Subscribe from a HUD or game manager if you want to display vehicle health.
     public event Action<float, float> VehicleHealthChanged;
+    // A reset is not ordinary healing; HUDs can snap instead of animating.
+    public event Action VehicleHealthReset;
 
     //CONTROLS
 
@@ -285,7 +291,34 @@ public class CarController : MonoBehaviour
     //CAR DATA
 
     [HideInInspector]
-    public float carSpeed; // Used to store the speed of the car.
+    public float carSpeed; // Legacy drivetrain value: keep existing torque/FX behavior.
+
+    /// <summary>Horizontal chassis speed in km/h, independent of wheel slip.</summary>
+    public float ActualSpeedKmh
+    {
+        get
+        {
+            if (carRigidbody == null) return 0f;
+            Vector3 velocity = carRigidbody.velocity;
+            velocity.y = 0f;
+            return velocity.magnitude * 3.6f;
+        }
+    }
+
+    /// <summary>Signed horizontal speed along the vehicle heading, in km/h.</summary>
+    public float SignedForwardSpeedKmh
+    {
+        get
+        {
+            if (carRigidbody == null) return 0f;
+            Vector3 forward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (forward.sqrMagnitude < 0.0001f) return 0f;
+            return Vector3.Dot(carRigidbody.velocity, forward.normalized) * 3.6f;
+        }
+    }
+
+    public float SpeedometerMaximumKmh => carStats != null
+        ? Mathf.Max(1f, carStats.maxSpeed) : 1f;
     [HideInInspector]
     public bool isDrifting; // Used to know whether the car is drifting or not.
     [HideInInspector]
@@ -518,19 +551,11 @@ public class CarController : MonoBehaviour
         }
         SetBrakeLights(false);
 
-        // We invoke 2 methods inside this script. CarSpeedUI() changes the text of the UI object that stores
-        // the speed of the car and CarSounds() controls the engine and drifting sounds. Both methods are invoked
-        // in 0 seconds, and repeatedly called every 0.1 seconds.
-        if (useUI)
+        // Optional standalone TMP display; the procedural HUD owns its own text.
+        if (useUI && carSpeedText != null)
         {
-            InvokeRepeating("CarSpeedUI", 0f, 0.1f);
-        }
-        else if (!useUI)
-        {
-            if (carSpeedText != null)
-            {
-                carSpeedText.text = "0";
-            }
+            CarSpeedUI();
+            InvokeRepeating(nameof(CarSpeedUI), 0.1f, 0.1f);
         }
 
         if (useSounds)
@@ -592,7 +617,12 @@ public class CarController : MonoBehaviour
             }
         }
 
-        HideLastDamageText();
+        // Hide the old indicator once, if a legacy scene still assigns it.
+        if (lastDamageTakenText != null)
+        {
+            lastDamageTakenText.text = string.Empty;
+            lastDamageTakenText.enabled = false;
+        }
         ResetBattery();
     }
 
@@ -778,11 +808,7 @@ public class CarController : MonoBehaviour
         // Add the car's thorns damage to every successful ram.
         float enemyDamage = ramDamage + Mathf.Max(0f, vehicleThornsDamage);
 
-        float enemyKnockback = Mathf.Lerp(
-            Mathf.Max(0f, minimumEnemyKnockback),
-            Mathf.Max(0f, maximumEnemyKnockback),
-            impact01
-        );
+        float enemyKnockback = Mathf.Max(0f, carStats.turretKnockbackForce);
 
         Vector3 impactPoint = transform.position;
 
@@ -799,7 +825,7 @@ public class CarController : MonoBehaviour
             return;
 
         float vehicleDamage = Mathf.Lerp(
-            Mathf.Max(0f, minimumVehicleDamagePerHit),
+            Mathf.Max(0f, maximumVehicleDamagePerHit - 10),
             Mathf.Max(0f, maximumVehicleDamagePerHit),
             impact01
         );
@@ -894,23 +920,11 @@ public class CarController : MonoBehaviour
         currentVehicleHealth = Mathf.Max(0f, currentVehicleHealth - damage);
 
         PlayDamageFeedback();
-        CancelInvoke(nameof(HideLastDamageText));
-        if (lastDamageTakenText != null)
-        {
-            lastDamageTakenText.text = "-" + ((int)damage).ToString();
-            Invoke(nameof(HideLastDamageText), 5f);
-        }
 
         if (currentVehicleHealth <= 0f)
             OnVehicleHealthDepleted();
 
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
-    }
-
-    private void HideLastDamageText()
-    {
-        if (lastDamageTakenText != null)
-            lastDamageTakenText.text = "";
     }
 
     /// <summary>Repairs an operational vehicle. Only RespawnVehicle revives a wreck.</summary>
@@ -934,8 +948,6 @@ public class CarController : MonoBehaviour
         ResetBattery();
         enemyContactStates.Clear();
         staleEnemyContacts.Clear();
-        CancelInvoke(nameof(HideLastDamageText));
-        HideLastDamageText();
 
         if (wreckFire != null)
             wreckFire.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -951,6 +963,7 @@ public class CarController : MonoBehaviour
                 vehicleXPCollector.enabled = collectorWasEnabled;
         }
 
+        VehicleHealthReset?.Invoke();
         VehicleHealthChanged?.Invoke(currentVehicleHealth, maxVehicleHealth);
     }
 
@@ -1106,7 +1119,7 @@ public class CarController : MonoBehaviour
                 }
             }
 
-                if (tireScreechSound != null && tireScreechSound.isPlaying)
+            if (tireScreechSound != null && tireScreechSound.isPlaying)
             {
                 tireScreechSound.Stop();
             }
@@ -1140,6 +1153,10 @@ public class CarController : MonoBehaviour
             Input.GetKeyDown(parkingBrakeKey) && HasPlayerInDriverSeat())
             SetParkingBrake(!parkingBrakeEngaged);
 
+        // Keep the optional legacy parking indicator synchronized even during EMP/wreck.
+        if (parkBrakeIcon != null && parkBrakeIcon.activeSelf != parkingBrakeEngaged)
+            parkBrakeIcon.SetActive(parkingBrakeEngaged);
+
         if (vehicleWrecked || IsEmpDisabled)
         {
             // Keep the wreck/EMP car physically present and its wheel meshes synchronized.
@@ -1148,18 +1165,9 @@ public class CarController : MonoBehaviour
             return;
         }
 
-        if (parkingBrakeEngaged)
-        {
-            parkBrakeIcon.SetActive(true);
-        }
-        else
-        {
-            parkBrakeIcon.SetActive(false);
-        }
-
         //CAR DATA
 
-        // We determine the speed of the car.
+        // Legacy wheel-derived drivetrain value. HUD uses ActualSpeedKmh instead.
         carSpeed = (2 * Mathf.PI * frontLeftCollider.radius * frontLeftCollider.rpm * 60) / 1000;
         // Save the local velocity of the car in the x axis. Used to know if the car is drifting.
         localVelocityX = transform.InverseTransformDirection(carRigidbody.velocity).x;
@@ -1404,23 +1412,14 @@ public class CarController : MonoBehaviour
         }
     }
 
-    // This method converts the car speed data from float to string, and then set the text of the UI carSpeedText with this value.
+    // Optional standalone TMP speed output. Do not assign the meter's text here.
     public void CarSpeedUI()
     {
-
-        if (useUI)
+        if (useUI && carSpeedText != null)
         {
-            try
-            {
-                float absoluteCarSpeed = Mathf.Abs(carSpeed);
-                carSpeedText.text = Mathf.RoundToInt(absoluteCarSpeed).ToString();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning(ex);
-            }
+            int speed = Mathf.RoundToInt(ActualSpeedKmh);
+            carSpeedText.SetText("{0:0}", speed);
         }
-
     }
 
     // This method controls the car sounds. For example, the car engine will sound slow when the car speed is low because the
@@ -2016,7 +2015,7 @@ public class CarController : MonoBehaviour
 
         if (!severeDamageActive)
         {
-            if(currentVehicleHealth / carStats.maxVehicleHealth <= 0.3f)
+            if (currentVehicleHealth / carStats.maxVehicleHealth <= 0.3f)
             {
                 severeDamageActive = true;
                 severeDamageParticleEffect.Play();

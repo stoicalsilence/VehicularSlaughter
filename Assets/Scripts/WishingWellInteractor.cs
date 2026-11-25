@@ -197,8 +197,8 @@ public sealed class WishingWellInteractor : MonoBehaviour
         string luckAmount = LuckPerLevel.ToString("0.##");
 
         string actionText = canSpend
-            ? $"[{interactKey}] Spend 1 Level Up -> Gain <color=#7DFF91>+{luckAmount} Luck</color>"
-            : $"1 Level -> <color=#7DFF91>+{luckAmount} Luck</color>";
+            ? $"[{interactKey}] Spend 1 Level Up -> Improve Luck\n"
+            : $"Level up to improve Luck here\n";
 
         string targetText =
             "<b>Wishin' Well</b>\n" +
@@ -215,7 +215,7 @@ public sealed class WishingWellInteractor : MonoBehaviour
                     ItemRarity.Epic, futureLuck, out float epicAfter))
             {
                 targetText +=
-                    "\n<color=#BFA0FF>Epic Drops:</color> " +
+                    "<color=#BFA0FF>Epic Drops:</color> " +
                     $"{epicBefore:0.0}% -> " +
                     $"<color=#7DFF91>{epicAfter:0.0}%</color>";
             }
@@ -230,12 +230,6 @@ public sealed class WishingWellInteractor : MonoBehaviour
                     $"{legendaryBefore:0.0}% -> " +
                     $"<color=#7DFF91>{legendaryAfter:0.0}%</color>";
             }
-        }
-
-        if (!canSpend)
-        {
-            targetText +=
-                "\n<color=#FF7777>No banked levels</color>";
         }
 
         if (interactionText.text != targetText)

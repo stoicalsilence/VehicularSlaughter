@@ -59,11 +59,11 @@ public sealed class PlayerGun : MonoBehaviour
     public float criticalChance => playerStats.gunCriticalChance;
 
     public float criticalDamageMultiplier => playerStats.gunCriticalDamageMultiplier;
-    
+
     public int magazineSize => playerStats.gunMagazineSize;
     public float reloadDuration => playerStats.gunReloadDuration;
 
-    public bool reloadAutomaticallyWhenEmpty = true; 
+    public bool reloadAutomaticallyWhenEmpty = true;
 
     public float maxShotDistance => playerStats.gunMaxShotDistance;
 
@@ -165,6 +165,16 @@ public sealed class PlayerGun : MonoBehaviour
 
     private Sequence reloadSequence;
 
+    // Read-only HUD access. The weapon remains the authority for ammo and reloads.
+    public int CurrentAmmo => currentAmmo;
+    public int MagazineSize => playerStats != null ? Mathf.Max(1, magazineSize) : 0;
+    public bool IsReloading => isReloading;
+
+    public bool AmmoInitialized { get; private set; }
+    public float ReloadProgress => isReloading && reloadSequence != null && reloadSequence.IsActive()
+        ? Mathf.Clamp01(reloadSequence.ElapsedPercentage(false)) : 0f;
+
+
     // Cached Animator data.
     private int idleStateHash;
     private int fireStateHash;
@@ -214,6 +224,7 @@ public sealed class PlayerGun : MonoBehaviour
             weaponAnimator = GetComponentInChildren<Animator>(true);
 
         currentAmmo = Mathf.Max(1, magazineSize);
+        AmmoInitialized = true;
 
         if (muzzleFlash != null)
             muzzleFlash.SetActive(false);
@@ -624,7 +635,7 @@ public sealed class PlayerGun : MonoBehaviour
 
             finalDamage += GetBonusSodaDamage();
 
-            if(playerInventory.HasItemByName("Ram Rod"))
+            if (playerInventory.HasItemByName("Ram Rod"))
             {
                 finalDamage = finalDamage * 2;
             }

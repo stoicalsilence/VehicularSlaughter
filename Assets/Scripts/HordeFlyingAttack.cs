@@ -108,12 +108,31 @@ public sealed class HordeFlyingAttack : MonoBehaviour
     private Vector3 targetVelocity;
     private CarController targetCar;
 
+    public AudioSource audioSource;
+    public AudioClip hoverSound;
+    public AudioClip altHoverSound;
+
     private void Awake()
     {
         body = GetComponent<Rigidbody>();
         owner = GetComponent<HordeEnemy>();
         if (windupIndicator != null) windupIndicator.SetActive(false);
         SetDiveTrail(false, true);
+    }
+
+    private void Start()
+    {
+        int r = UnityEngine.Random.Range(0, 100);
+        if(r < 50)
+        {
+            audioSource.clip = hoverSound;
+            audioSource.Play();
+        }
+        else
+        {
+            audioSource.clip = altHoverSound;
+            audioSource.Play();
+        }
     }
 
     // Called by HordeEnemy.ResetForSpawn while the instance is INACTIVE.

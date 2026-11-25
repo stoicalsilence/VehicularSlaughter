@@ -22,6 +22,10 @@ public class AmbientWindSpawner : MonoBehaviour
     public float minHeight = 2f;
     public float maxHeight = 10f;
 
+    [Header("Prewarm")]
+    public bool prewarm = true;
+    public float prewarmTime = 10f;
+
     private class WindInstance
     {
         public ParticleSystem system;
@@ -46,7 +50,9 @@ public class AmbientWindSpawner : MonoBehaviour
     {
         for (int i = 0; i < windCount; i++)
         {
-            ParticleSystem prefab = Random.value > 0.5f ? windVariantA : windVariantB;
+            ParticleSystem prefab = Random.value > 0.5f
+                ? windVariantA
+                : windVariantB;
 
             ParticleSystem wind = Instantiate(prefab, transform);
             wind.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -56,7 +62,13 @@ public class AmbientWindSpawner : MonoBehaviour
             float delay = Random.Range(spawnDelayRange.x, spawnDelayRange.y);
             yield return new WaitForSeconds(delay);
 
-            wind.Play();
+            // Prewarm particles before playback
+            if (prewarm)
+            {
+                wind.Simulate(prewarmTime, true, true, true);
+            }
+
+            wind.Play(true);
 
             winds.Add(new WindInstance
             {
@@ -81,7 +93,18 @@ public class AmbientWindSpawner : MonoBehaviour
 
             if (distance > repositionDistance)
             {
+                wind.system.Stop(
+                    true,
+                    ParticleSystemStopBehavior.StopEmittingAndClear);
+
                 wind.system.transform.position = GetRandomPositionAroundPlayer();
+
+                if (prewarm)
+                {
+                    wind.system.Simulate(prewarmTime, true, true, true);
+                }
+
+                wind.system.Play(true);
             }
 
             wind.nextRepositionTime = time + Random.Range(
