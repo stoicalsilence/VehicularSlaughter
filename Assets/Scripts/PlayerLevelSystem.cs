@@ -28,6 +28,8 @@ public sealed class PlayerLevelSystem : MonoBehaviour
     private int bankedLevels;
     private int totalLevelsEarned;
 
+    public AudioClip levelUpSound;
+
     public float CurrentXP => currentXP;
 
     public float XPRequiredForNextLevel =>
@@ -120,6 +122,7 @@ public sealed class PlayerLevelSystem : MonoBehaviour
 
             totalLevelsEarned++;
             bankedLevels++;
+            AudioManager.Play2D(levelUpSound);
             levelsGained++;
         }
 

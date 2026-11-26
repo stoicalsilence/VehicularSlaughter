@@ -192,6 +192,8 @@ public sealed class HordeManager : MonoBehaviour
     public bool IsRunning { get; private set; }
     public float ElapsedSeconds { get; private set; }
     public float RemainingSeconds => Mathf.Max(0f, runDuration - ElapsedSeconds);
+    // Read-only duration for procedural timer HUDs.
+    public float RunDurationSeconds => runDuration;
     public float PlayerDifficulty
     {
         get

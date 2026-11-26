@@ -140,7 +140,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 441e7fc409f55af40a33d5b0165cc064, type: 2}
+  - {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -302,7 +302,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 441e7fc409f55af40a33d5b0165cc064, type: 2}
+  - {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -464,7 +464,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 441e7fc409f55af40a33d5b0165cc064, type: 2}
+  - {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -558,7 +558,7 @@ TrailRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
-  m_Time: 1
+  m_Time: 0.5
   m_Parameters:
     serializedVersion: 3
     widthMultiplier: 0.6
@@ -574,6 +574,15 @@ TrailRenderer:
         weightedMode: 0
         inWeight: 0.33333334
         outWeight: 0.33333334
+      - serializedVersion: 3
+        time: 1
+        value: 0
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
@@ -722,7 +731,7 @@ TrailRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
-  m_Time: 0.2
+  m_Time: 0.5
   m_Parameters:
     serializedVersion: 3
     widthMultiplier: 0.6
@@ -738,6 +747,15 @@ TrailRenderer:
         weightedMode: 0
         inWeight: 0.33333334
         outWeight: 0.33333334
+      - serializedVersion: 3
+        time: 1
+        value: 0
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
@@ -838,7 +856,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 441e7fc409f55af40a33d5b0165cc064, type: 2}
+  - {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -919,7 +937,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 441e7fc409f55af40a33d5b0165cc064, type: 2}
+  - {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -1419,7 +1437,7 @@ MonoBehaviour:
   maxHealth: 12
   contactDamage: 0
   hitFlashDuration: 0.08
-  hitFlashMaterial: {fileID: 2100000, guid: 31bf614fb96f63948b3cd53592f9754b, type: 2}
+  hitFlashMaterial: {fileID: 2100000, guid: 2708cda588d96464ab2cd9919d292372, type: 2}
   flashEMPEnemies: 1
   deathParticlePool: {fileID: 0}
   playerInventory: {fileID: 0}

@@ -776,8 +776,8 @@ public class CarController : MonoBehaviour
         lastBatteryDisplayHP = batteryHP;
         lastBatteryDisplaySeconds = seconds;
         lastBatteryDisplayWrecked = vehicleWrecked;
-        batteryStatusText.text = vehicleWrecked ? "BATTERY OFFLINE" : IsEmpDisabled ?
-            $"EMP - {seconds}s" : $"{batteryHP}/{MaxBatteryHP}";
+        batteryStatusText.text = vehicleWrecked ? "" : IsEmpDisabled ?
+            $"{seconds}s" : $"{batteryHP}/{MaxBatteryHP}";
     }
 
     private void HandleEnemyImpact(Collision collision, HordeEnemy enemy)

@@ -231,6 +231,9 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     [SerializeField] private TextMeshProUGUI[] descriptionTexts = new TextMeshProUGUI[3];
     [SerializeField] private Image[] rewardFrames = new Image[3];
     [SerializeField] private TextMeshProUGUI remainingChoicesText;
+    [Tooltip("Optional current earned level, independent of remaining reward choices.")]
+    [SerializeField] private TextMeshProUGUI currentLevelText;
+    [SerializeField] private string currentLevelPrefix = "LEVEL ";
 
     [Header("Reward Queue")]
     [Tooltip("Keep unspent levels when no useful reward remains. Retry through RetryPendingChoices when stats change.")]
@@ -285,6 +288,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     private bool hasSavedGameState;
     private bool listenersRegistered;
     private bool initialized;
+    private PlayerLevelSystem subscribedLevelSystem;
+    private int lastDisplayedLevel = -1;
 
     private float previousTimeScale;
     private CursorLockMode previousCursorLock;
@@ -717,8 +722,31 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void OnEnable()
     {
+        if (initialized && levelSystem != null)
+        {
+            subscribedLevelSystem = levelSystem;
+            subscribedLevelSystem.LevelEarned += OnLevelEarned;
+            lastDisplayedLevel = -1;
+            UpdateCurrentLevelText();
+        }
+
         if (initialized && pendingChoices > 0)
             ShowNextOffer();
+    }
+
+    private void OnLevelEarned(int ignoredEarnedLevel)
+    {
+        UpdateCurrentLevelText();
+    }
+
+    private void UpdateCurrentLevelText()
+    {
+        if (currentLevelText == null || levelSystem == null) return;
+        // TotalLevelsEarned already contains the final total for a multi-level award.
+        int level = levelSystem.TotalLevelsEarned + 1;
+        if (level == lastDisplayedLevel) return;
+        lastDisplayedLevel = level;
+        currentLevelText.text = currentLevelPrefix + level.ToString();
     }
 
     private bool HasValidUI()
@@ -1347,10 +1375,12 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void UpdateRemainingChoicesText()
     {
+        // Also refresh before a newly queued/opened reward offer is presented.
+        UpdateCurrentLevelText();
         if (remainingChoicesText != null)
         {
             remainingChoicesText.richText = true;
-            remainingChoicesText.text = $"<b>{pendingChoices}</b> {(pendingChoices == 1 ? "LEVEL" : "LEVELS")} REMAINING";
+            remainingChoicesText.text = $"<b>{pendingChoices}</b> {(pendingChoices == 1 ? "UPGRADE" : "UPGRADES")} REMAINING";
         }
     }
 
@@ -1568,6 +1598,10 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void OnDisable()
     {
+        if (!ReferenceEquals(subscribedLevelSystem, null))
+            subscribedLevelSystem.LevelEarned -= OnLevelEarned;
+        subscribedLevelSystem = null;
+
         KillMenuTween();
         ClearMenuFocus();
         inputReady = false;
