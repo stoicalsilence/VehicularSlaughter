@@ -82,7 +82,7 @@ public sealed class PlayerRadio : MonoBehaviour
 
     public event Action<Vector3> AirstrikeRequested;
 
-    private enum RadioState
+    public enum RadioState
     {
         WeaponReady,
         Opening,
@@ -91,7 +91,7 @@ public sealed class PlayerRadio : MonoBehaviour
         Returning
     }
 
-    private enum CallType
+    public enum CallType
     {
         None,
         RepositionCar,
@@ -103,6 +103,18 @@ public sealed class PlayerRadio : MonoBehaviour
     private CallType selectedCall = CallType.None;
 
     private float charge;
+
+    // Read-only HUD API. Gameplay remains the owner of all timers and selection.
+    public RadioState State => state;
+    public CallType PreviewCall => GetCallTypeForCharge();
+    public CallType SelectedCall => selectedCall;
+    public float Charge01 => Mathf.Clamp01(charge);
+    public bool HasValidPlacement => state == RadioState.Placing && hasValidPlacement;
+    public bool IsInVehicle => vehicleInteractor != null && vehicleInteractor.currentCarController != null;
+    public float CooldownRemaining => GetRadioCooldownRemaining();
+    public float CooldownDuration { get; private set; }
+    public CallType LastManualCall { get; private set; }
+
 
     private float nextRepositionTime;
     private float nextRespawnTime;
@@ -260,14 +272,14 @@ public sealed class PlayerRadio : MonoBehaviour
 
     private void UpdateChargeMeter()
     {
+        if (chargeMeterImage == null)
+            return;
+
         displayedCharge = Mathf.Lerp(
             displayedCharge,
             charge,
             Time.deltaTime * fillLerpSpeed
         );
-
-        if (chargeMeterImage == null)
-            return;
 
         chargeMeterImage.fillAmount = displayedCharge;
 
@@ -337,7 +349,8 @@ public sealed class PlayerRadio : MonoBehaviour
 
         AudioManager.Play2D(selectCallInSound);
 
-        radioUI.SetActive(false);
+        if (radioUI != null)
+            radioUI.SetActive(false);
 
         if (selectedCall != CallType.Airstrike &&
             carController == null)
@@ -561,6 +574,8 @@ public sealed class PlayerRadio : MonoBehaviour
 
                 nextRepositionTime =
                 Time.time + playerStats.radioRepositionCooldown;
+                CooldownDuration = Mathf.Max(0f, playerStats.radioRepositionCooldown);
+                LastManualCall = CallType.RepositionCar;
                 GameObject particlesBlueReposition = Instantiate(cashInSelectParticleBlue, placementGhost.transform.position + Vector3.up * 2f, Quaternion.identity);
                 Destroy(particlesBlueReposition, 2f);
 
@@ -575,6 +590,8 @@ public sealed class PlayerRadio : MonoBehaviour
 
                 nextRespawnTime =
                 Time.time + playerStats.radioRespawnCooldown;
+                CooldownDuration = Mathf.Max(0f, playerStats.radioRespawnCooldown);
+                LastManualCall = CallType.RespawnCar;
                 GameObject particlesBlueRespawn = Instantiate(cashInSelectParticleBlue, placementGhost.transform.position + Vector3.up, Quaternion.identity);
                 Destroy(particlesBlueRespawn, 2f);
 
@@ -584,6 +601,8 @@ public sealed class PlayerRadio : MonoBehaviour
 
                 nextAirstrikeTime =
                     Time.time + playerStats.radioAirstrikeCooldown;
+                CooldownDuration = Mathf.Max(0f, playerStats.radioAirstrikeCooldown);
+                LastManualCall = CallType.Airstrike;
 
                 AudioManager.Play2D(airSupportInbound, 0.3f);
 
@@ -734,8 +753,10 @@ public sealed class PlayerRadio : MonoBehaviour
             state == RadioState.WeaponReady)
             return;
 
-        radioUI.SetActive(false);
-        promptText.text = "";
+        if (radioUI != null)
+            radioUI.SetActive(false);
+        if (promptText != null)
+            promptText.text = "";
 
         StartCoroutine(ReturnToWeaponRoutine());
     }
@@ -849,6 +870,9 @@ public sealed class PlayerRadio : MonoBehaviour
 
     private void UpdateCooldownUI()
     {
+        if (generalCooldownUI == null && generalCooldownText == null)
+            return;
+
         float remaining = GetRadioCooldownRemaining();
 
         bool onCooldown = remaining > 0f;
