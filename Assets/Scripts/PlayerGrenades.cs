@@ -45,6 +45,12 @@ public sealed class PlayerGrenades : MonoBehaviour
     [Tooltip("Optional TMP text. Example: G  1/2  (+1 in 24s).")]
     [SerializeField] private TMP_Text grenadeHudText;
 
+    // Read-only HUD context. This does not change throw or recharge behavior.
+    public KeyCode ThrowKey => throwKey;
+    public bool IsInVehicle => vehicleInteractor != null && vehicleInteractor.IsInVehicle;
+    public bool IsThrowContextAvailable => isActiveAndEnabled &&
+        vehicleInteractor != null && playerHealth != null && CanThrow();
+
     public int CurrentGrenades { get; private set; }
     public int MaxGrenades => playerStats == null ? 0 : Mathf.Max(0, playerStats.grenadeCapacity);
     public float NextGrenadeInSeconds => CurrentGrenades >= MaxGrenades || MaxGrenades == 0
