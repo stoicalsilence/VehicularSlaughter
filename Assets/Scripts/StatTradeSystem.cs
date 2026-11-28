@@ -53,6 +53,7 @@ public sealed class StatTradeSystem : MonoBehaviour
     {
         public Button button;
         public TextMeshProUGUI description;
+        public HUDStatTradeCard card;
     }
 
     private sealed class Change
@@ -101,6 +102,39 @@ public sealed class StatTradeSystem : MonoBehaviour
     [SerializeField, Range(0.01f, 1f)] private float menuStartScale = 0.8f;
     [SerializeField] private Ease menuOpenEase = Ease.OutBack;
 
+    [Header("Corrupted Crate Presentation (Optional)")]
+    [SerializeField] private HUDStatTradeCard declineCard;
+    [SerializeField] private Button declineButton;
+    [SerializeField] private RectTransform presentationRoot;
+    [SerializeField] private HUDRadialRays curseRays;
+    [SerializeField] private HUDParticleBurst revealParticles;
+    [SerializeField] private RectTransform revealOrigin;
+    [SerializeField] private TMP_Text menuHeading;
+    [SerializeField] private Color curseColor = new Color32(180, 125, 232, 255);
+    [SerializeField, Range(0f, 1f)] private float curseRayOpacity = .23f;
+    [SerializeField, Min(0f)] private float confirmationHold = .28f;
+    [SerializeField, Range(0f, .15f)] private float confirmationPunch = .085f;
+    [SerializeField, Min(0f)] private float menuCloseDuration = .16f;
+    [SerializeField] private AudioClip declineSound;
+    [SerializeField] private AudioClip hoverSound;
+    [SerializeField, Range(0f, 1f)] private float hoverVolume = .15f;
+    [Header("Corruption Atmosphere (v1.1)")]
+    [SerializeField] private bool enhancedVisibility = true;
+    [SerializeField, Range(0f, 1f)] private float minimumBackgroundOpacity = .84f;
+    [SerializeField, Range(0f, 1f)] private float tradeTintOpacity = .065f;
+    [SerializeField] private bool ambientCorruption = true;
+    [SerializeField, Range(0, 64)] private int ambientEmberCount = 36;
+    [SerializeField, Range(0f, 1f)] private float ambientEmberOpacity = .48f;
+    [SerializeField, Range(0f, 1f)] private float ambientAuraOpacity = .10f;
+    [SerializeField] private bool confirmationShockwave = true;
+    [SerializeField, Range(0f, 1f)] private float shockwaveOpacity = .65f;
+    [SerializeField, Range(0f, .15f)] private float numberPunch = .065f;
+    private HUDCorruptionAtmosphere atmosphere;
+    private Color BrightCurse => enhancedVisibility ? Color.Lerp(curseColor, Color.white, .32f) : curseColor;
+    private bool inputReady;
+    private HUDStatTradeCard highlightedCard;
+    private float lastHoverSound = -100f;
+    private readonly List<RaycastResult> pointerHits = new List<RaycastResult>(16);
     private CanvasGroup choiceCanvasGroup;
     private Vector3 choicePanelOpenScale = Vector3.one;
     private Sequence menuSequence;
@@ -125,6 +159,16 @@ public sealed class StatTradeSystem : MonoBehaviour
         if (inventory == null) inventory = FindObjectOfType<PlayerInventory>();
         if (levelRewards == null) levelRewards = FindObjectOfType<PlayerLevelRewardSystem>();
 
+        if (choicePanel == null || choicePanel == gameObject || transform.IsChildOf(choicePanel.transform) ||
+            !ValidChoice(optionA) || !ValidChoice(optionB))
+        {
+            Debug.LogError("StatTradeSystem: Assign an independent choice panel and both choice buttons/texts or cards.", this);
+            return;
+        }
+        if (optionA.card != null) optionA.card.SetFocusHandler(HighlightCard);
+        if (optionB.card != null) optionB.card.SetFocusHandler(HighlightCard);
+        if (declineCard != null) declineCard.SetFocusHandler(HighlightCard);
+        if (declineButton != null) declineButton.onClick.AddListener(Decline);
         optionA.button.onClick.AddListener(SelectA);
         optionB.button.onClick.AddListener(SelectB);
         choicePanelOpenScale = choicePanel.transform.localScale;
@@ -138,37 +182,116 @@ public sealed class StatTradeSystem : MonoBehaviour
         choiceCanvasGroup.interactable = true;
         choiceCanvasGroup.blocksRaycasts = true;
 
+        SetupAtmosphere();
         choicePanel.SetActive(false);
         ready = true;
+    }
+
+    // Create at most one atmosphere graphic per menu, using the existing installed hierarchy.
+    // Legacy text-only menus are intentionally left alone.
+    private void SetupAtmosphere()
+    {
+        if (presentationRoot == null) return;
+        var go = new GameObject("CorruptionAtmosphere (Runtime)", typeof(RectTransform), typeof(CanvasRenderer));
+        go.layer = choicePanel.layer;
+        var r = (RectTransform)go.transform; r.SetParent(choicePanel.transform, false);
+        r.anchorMin = Vector2.zero; r.anchorMax = Vector2.one; r.offsetMin = r.offsetMax = Vector2.zero;
+        r.SetAsFirstSibling();
+        atmosphere = go.AddComponent<HUDCorruptionAtmosphere>();
+        atmosphere.raycastTarget = false;
+        if (enhancedVisibility)
+        {
+            var background = choicePanel.GetComponent<Image>();
+            if (background != null) { Color c = background.color; c.a = Mathf.Max(c.a, minimumBackgroundOpacity); background.color = c; }
+            var subtitle = presentationRoot.Find("Subtitle");
+            var hint = presentationRoot.Find("DeclineHint");
+            if (subtitle != null && subtitle.TryGetComponent<TMP_Text>(out var st)) st.color = new Color32(218, 204, 233, 255);
+            if (hint != null && hint.TryGetComponent<TMP_Text>(out var ht))
+            {
+                ht.color = new Color32(206, 193, 221, 255);
+                if (ht.text == "Leave without making a trade. The crate is spent.") ht.text = "";
+                ht.fontSize = Mathf.Max(ht.fontSize, 20f);
+            }
+        }
+        foreach (var card in new[] { optionA.card, optionB.card })
+            if (card != null) card.ConfigureEnhancements(enhancedVisibility, tradeTintOpacity, numberPunch);
     }
 
     private void AnimateMenuOpen()
     {
         menuSequence?.Kill();
-
-        choicePanel.transform.localScale =
-            choicePanelOpenScale * menuStartScale;
-
+        inputReady = false;
         choiceCanvasGroup.alpha = 0f;
-
+        choiceCanvasGroup.interactable = false;
+        choiceCanvasGroup.blocksRaycasts = true;
         choicePanel.SetActive(true);
-
+        ResetCard(optionA.card); ResetCard(optionB.card); ResetCard(declineCard);
+        if (atmosphere != null) atmosphere.Begin(curseColor, ambientCorruption, ambientEmberCount, ambientAuraOpacity, ambientEmberOpacity, confirmationShockwave);
+        bool tactical = presentationRoot != null;
+        choicePanel.transform.localScale = tactical ? choicePanelOpenScale : choicePanelOpenScale * menuStartScale;
+        float d = Mathf.Max(0f, menuOpenDuration);
+        if (d <= 0f) { FinishReveal(); return; }
         menuSequence = DOTween.Sequence().SetUpdate(true);
-
-        menuSequence.Join(
-            choicePanel.transform
-                .DOScale(choicePanelOpenScale, menuOpenDuration)
-                .SetEase(menuOpenEase));
-
-        menuSequence.Join(
-            choiceCanvasGroup
-                .DOFade(1f, menuOpenDuration)
-                .SetEase(Ease.OutQuad));
+        menuSequence.Join(choiceCanvasGroup.DOFade(1f, d).SetEase(Ease.OutQuad));
+        if (tactical)
+        {
+            if (optionA.card != null) optionA.card.AddReveal(menuSequence, 0f, d);
+            if (optionB.card != null) optionB.card.AddReveal(menuSequence, d * .14f, d * .86f);
+            if (declineCard != null) declineCard.AddReveal(menuSequence, d * .25f, d * .75f);
+        }
+        else menuSequence.Join(choicePanel.transform.DOScale(choicePanelOpenScale, d).SetEase(menuOpenEase));
+        menuSequence.OnComplete(() => { menuSequence = null; FinishReveal(); });
     }
 
+    private static void ResetCard(HUDStatTradeCard card) { if (card != null) card.ResetVisual(); }
+    private void FinishReveal()
+    {
+        if (!IsOpen) return;
+        choiceCanvasGroup.alpha = 1f;
+        choicePanel.transform.localScale = choicePanelOpenScale;
+        if (curseRays != null) curseRays.Play(curseColor, curseRayOpacity, .95f, true);
+        if (revealParticles != null && revealOrigin != null)
+        {
+            revealParticles.color = curseColor;
+            revealParticles.Emit(revealOrigin, true);
+        }
+        inputReady = true;
+        choiceCanvasGroup.interactable = true;
+        // Refresh real mouse focus once. No automatic first-option selection.
+        if (EventSystem.current != null)
+        {
+            pointerHits.Clear();
+            // Legacy Input is already used by the game. Guard for projects switching input backends.
+#if ENABLE_LEGACY_INPUT_MANAGER
+            var data = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
+            EventSystem.current.RaycastAll(data, pointerHits);
+            if (pointerHits.Count > 0 && pointerHits[0].gameObject != null)
+            {
+                var card = pointerHits[0].gameObject.GetComponentInParent<HUDStatTradeCard>();
+                if (card == optionA.card || card == optionB.card || card == declineCard) HighlightCard(card, true);
+            }
+            pointerHits.Clear();
+#endif
+        }
+    }
+    private void HighlightCard(HUDStatTradeCard card, bool enter)
+    {
+        if (!IsOpen || !inputReady || resolving || card == null) return;
+        if (!enter)
+        {
+            if (highlightedCard == card) { card.Highlight(false); highlightedCard = null; }
+            return;
+        }
+        if (highlightedCard == card) return;
+        if (highlightedCard != null) highlightedCard.Highlight(false);
+        highlightedCard = card; card.Highlight(true);
+        if (hoverSound != null && Time.unscaledTime - lastHoverSound >= .075f)
+        { lastHoverSound = Time.unscaledTime; AudioManager.Play2D(hoverSound, hoverVolume); }
+    }
     private bool ValidChoice(ChoiceUI choice) => choice != null && choice.button != null &&
-        choice.description != null && choice.button.transform.IsChildOf(choicePanel.transform) &&
-        choice.description.transform.IsChildOf(choicePanel.transform);
+        choice.button.transform.IsChildOf(choicePanel.transform) &&
+        ((choice.card != null && choice.card.gameObject == choice.button.gameObject) ||
+        (choice.description != null && choice.description.transform.IsChildOf(choicePanel.transform)));
 
     public bool TryOpen(StatTradePickup pickup)
     {
@@ -190,16 +313,26 @@ public sealed class StatTradeSystem : MonoBehaviour
         Cursor.visible = true;
         if (radioUI != null) radioUI.SetActive(false);
 
-        optionA.description.richText = true;
-        optionB.description.richText = true;
-        optionA.description.text = Describe(offers[0]);
-        optionB.description.text = Describe(offers[1]);
-        AudioManager.Play2D(breakCrateSound);
-        AudioManager.Play2D(scarySound);
-        AnimateMenuOpen();
-        if (EventSystem.current != null)
-            EventSystem.current.SetSelectedGameObject(null);
-        return true;
+        try
+        {
+            BindOffer(optionA, offers[0]);
+            BindOffer(optionB, offers[1]);
+            if (menuHeading != null) { menuHeading.text = "CORRUPTED CRATE"; menuHeading.color = BrightCurse; }
+            highlightedCard = null;
+            inputReady = false;
+            AudioManager.Play2D(breakCrateSound);
+            AudioManager.Play2D(scarySound);
+            if (EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(null);
+            AnimateMenuOpen();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception, this);
+            Close(true);
+            return false;
+        }
     }
 
     private bool RollOffers()
@@ -220,12 +353,12 @@ public sealed class StatTradeSystem : MonoBehaviour
 
         var pairs = new List<Offer>();
         foreach (Change bonus in bonuses)
-        foreach (Change penalty in penalties)
-        {
-            if (ReferenceEquals(bonus.definition, penalty.definition)) continue;
-            if (!allowMixedTargets && bonus.IsVehicle != penalty.IsVehicle) continue;
-            pairs.Add(new Offer { bonus = bonus, penalty = penalty });
-        }
+            foreach (Change penalty in penalties)
+            {
+                if (ReferenceEquals(bonus.definition, penalty.definition)) continue;
+                if (!allowMixedTargets && bonus.IsVehicle != penalty.IsVehicle) continue;
+                pairs.Add(new Offer { bonus = bonus, penalty = penalty });
+            }
 
         // Require two distinct valid trades. Never show a bonus without a real cost.
         if (pairs.Count < 2) return false;
@@ -261,9 +394,9 @@ public sealed class StatTradeSystem : MonoBehaviour
             ? stat.bonusStrengthMultiplier
             : stat.penaltyStrengthMultiplier;
 
-                float strength = UnityEngine.Random.Range(low, high)
-                    * stat.strengthMultiplier
-                    * directionMultiplier / 100f;
+        float strength = UnityEngine.Random.Range(low, high)
+            * stat.strengthMultiplier
+            * directionMultiplier / 100f;
         if (!Finite(strength) || strength <= 0f) return null;
 
         bool increase = isBonus != stat.lowerIsBetter;
@@ -382,7 +515,32 @@ public sealed class StatTradeSystem : MonoBehaviour
         float percent = change.Delta / change.before * 100f;
         string amount = percent.ToString("+0.#;-0.#;0") + "%";
         return $"<color=#{ColorUtility.ToHtmlStringRGB(color)}><b>{amount} {name}</b></color>\n" +
-               $"{change.before:0.###} → {change.after:0.###}";
+               $"{change.before:0.###} -> {change.after:0.###}";
+    }
+
+    private void BindOffer(ChoiceUI ui, Offer offer)
+    {
+        if (ui.card != null)
+        {
+            BindChange(ui.card, offer.bonus, true);
+            BindChange(ui.card, offer.penalty, false);
+        }
+        else if (ui.description != null)
+        { ui.description.richText = true; ui.description.text = Describe(offer); }
+    }
+    private void BindChange(HUDStatTradeCard card, Change change, bool benefit)
+    {
+        string name = change.definition.displayName;
+        if (string.IsNullOrWhiteSpace(name))
+            name = change.definition is PlayerTradeStat p ? p.stat.ToString() : ((VehicleTradeStat)change.definition).stat.ToString();
+        string category = change.IsVehicle ? "VEHICLE" : "PLAYER";
+        string amount = (change.Delta / change.before * 100f).ToString("+0.#;-0.#;0") + "%";
+        Color resultTint = benefit ? bonusColor : penaltyColor;
+        string comparison = enhancedVisibility
+            ? $"{change.before:0.###} -> <color=#{ColorUtility.ToHtmlStringRGB(resultTint)}>{change.after:0.###}</color>"
+            : $"{change.before:0.###} -> {change.after:0.###}";
+        if (benefit) card.SetBenefit(category, name, amount, comparison, bonusColor);
+        else card.SetCost(category, name, amount, comparison, penaltyColor);
     }
 
     private void SelectA() => Select(0);
@@ -390,7 +548,7 @@ public sealed class StatTradeSystem : MonoBehaviour
 
     private void Select(int index)
     {
-        if (!IsOpen || resolving) return;
+        if (!IsOpen || resolving || !inputReady) return;
         if (source == null) { Close(true); return; }
         Offer offer = offers[index];
         if (offer == null || !IsCurrent(offer.bonus) || !IsCurrent(offer.penalty))
@@ -401,6 +559,8 @@ public sealed class StatTradeSystem : MonoBehaviour
         }
 
         resolving = true;
+        inputReady = false;
+        choiceCanvasGroup.interactable = false;
         try
         {
             // Apply the cost first. Both changes were validated against the visible offer.
@@ -414,7 +574,7 @@ public sealed class StatTradeSystem : MonoBehaviour
             }
             AudioManager.Play2D(chooseSound);
             if (source != null) source.CompleteChoice();
-            Close(true);
+            AnimateResolution(index == 0 ? optionA.card : optionB.card, false);
         }
         catch (Exception exception)
         {
@@ -424,9 +584,54 @@ public sealed class StatTradeSystem : MonoBehaviour
         finally { resolving = false; }
     }
 
+    // Declining spends no stat, XP, item, or banish charge. Consume the pickup to prevent rerolls.
+    public void Decline()
+    {
+        if (!IsOpen || resolving || !inputReady) return;
+        resolving = true; inputReady = false; choiceCanvasGroup.interactable = false;
+        try
+        {
+            if (source == null) { Close(true); return; }
+            if (declineSound != null) AudioManager.Play2D(declineSound);
+            source.CompleteChoice();
+            AnimateResolution(declineCard, true);
+        }
+        catch (Exception ex) { Debug.LogException(ex, this); Close(true); }
+        finally { resolving = false; }
+    }
+    private void AnimateResolution(HUDStatTradeCard chosen, bool declined)
+    {
+        if (!IsOpen) return;
+        if (presentationRoot == null || choicePanel == null || !choicePanel.activeInHierarchy)
+        { Close(true); return; }
+        menuSequence?.Kill();
+        if (highlightedCard != null) highlightedCard.Highlight(false);
+        highlightedCard = null;
+        if (curseRays != null) curseRays.Clear();
+        if (revealParticles != null) revealParticles.Clear();
+        if (menuHeading != null)
+        { menuHeading.text = declined ? "BARGAIN DECLINED" : "BARGAIN SEALED"; menuHeading.color = declined ? (Color) new Color32(166, 179, 187, 255) : BrightCurse; }
+        float hold = declined ? Mathf.Min(.12f, confirmationHold) : Mathf.Max(0f, confirmationHold);
+        float close = Mathf.Max(0f, menuCloseDuration);
+        if (hold + close <= 0f) { Close(true); return; }
+        if (!declined && chosen != null && atmosphere != null)
+            atmosphere.Shockwave((RectTransform)chosen.transform, Mathf.Min(.48f, hold + close), shockwaveOpacity);
+        menuSequence = DOTween.Sequence().SetUpdate(true);
+        if (hold > 0f) menuSequence.AppendInterval(hold);
+        if (chosen != null) chosen.AddConfirmation(menuSequence, hold, declined ? .025f : confirmationPunch,
+                declined ? (Color) new Color32(166, 179, 187, 255) : curseColor, !declined);
+        if (optionA.card != null && optionA.card != chosen) optionA.card.AddDim(menuSequence, hold, .42f);
+        if (optionB.card != null && optionB.card != chosen) optionB.card.AddDim(menuSequence, hold, .42f);
+        if (declineCard != null && declineCard != chosen) declineCard.AddDim(menuSequence, hold, .42f);
+        if (close > 0f) menuSequence.Insert(hold, choiceCanvasGroup.DOFade(0f, close).SetEase(Ease.InQuad));
+        menuSequence.OnComplete(() => { menuSequence = null; Close(true); });
+    }
+
     private void Close(bool retryLevels)
     {
         if (!IsOpen) return;
+        inputReady = false;
+        highlightedCard = null;
         if (EventSystem.current != null && choicePanel != null)
         {
             GameObject selected = EventSystem.current.currentSelectedGameObject;
@@ -435,6 +640,7 @@ public sealed class StatTradeSystem : MonoBehaviour
         }
         menuSequence?.Kill();
         menuSequence = null;
+        if (atmosphere != null) atmosphere.Stop();
 
         if (choicePanel != null)
         {
@@ -443,7 +649,12 @@ public sealed class StatTradeSystem : MonoBehaviour
         }
 
         if (choiceCanvasGroup != null)
+        {
             choiceCanvasGroup.alpha = 1f;
+            choiceCanvasGroup.interactable = false;
+            choiceCanvasGroup.blocksRaycasts = false;
+        }
+        ResetCard(optionA.card); ResetCard(optionB.card); ResetCard(declineCard);
         if (radioUI != null) radioUI.SetActive(previousRadioActive);
         Time.timeScale = previousTimeScale;
         Cursor.lockState = previousCursorLock;
@@ -452,6 +663,7 @@ public sealed class StatTradeSystem : MonoBehaviour
         offeredCar = null;
         Array.Clear(offers, 0, offers.Length);
         activeMenu = null;
+        resolving = false;
         if (retryLevels) ResumeLevelRewards();
     }
 
@@ -469,22 +681,36 @@ public sealed class StatTradeSystem : MonoBehaviour
         if (!ready) return;
         if (optionA.button != null) optionA.button.onClick.RemoveListener(SelectA);
         if (optionB.button != null) optionB.button.onClick.RemoveListener(SelectB);
+        if (declineButton != null) declineButton.onClick.RemoveListener(Decline);
+        if (optionA.card != null) optionA.card.SetFocusHandler(null);
+        if (optionB.card != null) optionB.card.SetFocusHandler(null);
+        if (declineCard != null) declineCard.SetFocusHandler(null);
         Close(false);
     }
 
     private static PlayerTradeStat P(PlayerStatToModify stat, string name, float min, float max,
         bool lower = false, bool enabled = true, float strength = 1f) => new PlayerTradeStat
-    {
-        stat = stat, displayName = name, minimumValue = min, maximumValue = max,
-        lowerIsBetter = lower, enabled = enabled, strengthMultiplier = strength
-    };
+        {
+            stat = stat,
+            displayName = name,
+            minimumValue = min,
+            maximumValue = max,
+            lowerIsBetter = lower,
+            enabled = enabled,
+            strengthMultiplier = strength
+        };
 
     private static VehicleTradeStat V(CarStatToModify stat, string name, float min, float max,
         bool lower = false, bool enabled = true, float strength = 1f) => new VehicleTradeStat
-    {
-        stat = stat, displayName = name, minimumValue = min, maximumValue = max,
-        lowerIsBetter = lower, enabled = enabled, strengthMultiplier = strength
-    };
+        {
+            stat = stat,
+            displayName = name,
+            minimumValue = min,
+            maximumValue = max,
+            lowerIsBetter = lower,
+            enabled = enabled,
+            strengthMultiplier = strength
+        };
 
     private static List<PlayerTradeStat> DefaultPlayerStats() => new List<PlayerTradeStat>
     {

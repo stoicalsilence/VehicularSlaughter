@@ -39,6 +39,17 @@ public sealed class HUDRewardCard : MonoBehaviour, IPointerEnterHandler, IPointe
     private Vector3 cardRestScale = Vector3.one;
     private bool capturedCardScale;
     private float confirmationFlash;
+    private RectTransform amountRect;
+    private Vector3 amountRestScale = Vector3.one;
+    private bool enhancedRim;
+    private bool rimCaptured;
+    private HUDPanel.CornerAccents originalAccents;
+    private float originalAccentLength;
+
+    public void SetEnhancedRim(bool value)
+    {
+        enhancedRim = value;
+    }
 
     public bool IsConfirmed => bound && confirmed;
 
@@ -59,11 +70,23 @@ public sealed class HUDRewardCard : MonoBehaviour, IPointerEnterHandler, IPointe
     {
         if (!capturedScale && content != null) { restScale = content.localScale; capturedScale = true; }
         if (!capturedCardScale) { cardRestScale = transform.localScale; capturedCardScale = true; }
+        if (amountRect == null && amountText != null)
+        {
+            amountRect = amountText.rectTransform;
+            amountRestScale = amountRect.localScale;
+        }
+        if (!rimCaptured && panel != null)
+        {
+            originalAccents = panel.accents;
+            originalAccentLength = panel.accentLength;
+            rimCaptured = true;
+        }
     }
     private void ResetConfirmationVisual()
     {
         confirmationFlash = 0f;
         if (capturedCardScale) transform.localScale = cardRestScale;
+        if (amountRect != null) amountRect.localScale = amountRestScale;
     }
     public void Bind(string category, string stat, ItemRarity tier, string amount, string comparison,
         Color rarityColor, Color categoryColor, Color titleColor, Color improvementColor)
@@ -116,11 +139,11 @@ public sealed class HUDRewardCard : MonoBehaviour, IPointerEnterHandler, IPointe
         confirmed = true;
         ClearRarityShine();
         Draw();
-        Emit(confirmParticles, accent);
+        Emit(confirmParticles, enhancedRim && rarity == ItemRarity.Common ? (Color) new Color32(112, 231, 237, 255) : accent);
     }
     /// <summary>Append a frame punch and flash inside the owner's existing unscaled hold.
     /// No independent tween, delay, or layout size changes.</summary>
-    public void AddConfirmation(Sequence sequence, float hold, float punchStrength, float flashStrength)
+    public void AddConfirmation(Sequence sequence, float hold, float punchStrength, float flashStrength, float numberPunch = 0f)
     {
         if (!IsConfirmed || sequence == null || hold <= 0f) return;
         CaptureScale();
@@ -135,6 +158,15 @@ public sealed class HUDRewardCard : MonoBehaviour, IPointerEnterHandler, IPointe
             sequence.Insert(0f, transform.DOScale(compressed, duration * .18f).SetEase(Ease.OutQuad));
             sequence.Insert(duration * .18f, transform.DOScale(expanded, duration * .32f).SetEase(Ease.OutCubic));
             sequence.Insert(duration * .50f, transform.DOScale(cardRestScale, duration * .50f).SetEase(Ease.OutCubic));
+        }
+        if (amountRect != null && numberPunch > 0f)
+        {
+            float strength = Mathf.Clamp(numberPunch, 0f, .2f);
+            amountRect.localScale = amountRestScale;
+            // Peak slightly after the frame compresses, then settle within the hold.
+            float start = duration * .18f;
+            sequence.Insert(start, amountRect.DOScale(amountRestScale * (1f + strength), duration * .32f).SetEase(Ease.OutCubic));
+            sequence.Insert(duration * .50f, amountRect.DOScale(amountRestScale, duration * .50f).SetEase(Ease.OutQuad));
         }
         confirmationFlash = Mathf.Clamp01(flashStrength);
         if (confirmationFlash > 0f)
@@ -180,7 +212,12 @@ public sealed class HUDRewardCard : MonoBehaviour, IPointerEnterHandler, IPointe
             Color rim = Color.Lerp(c, Color.white, flash);
             panel.borderColor = focus || confirmed ? rim : Color.Lerp(new Color32(91, 112, 126, 255), c, .65f);
             panel.accentColor = rim;
-            panel.borderThickness = focus || confirmed ? 2.5f + flash * 2f : 1.5f;
+            panel.borderThickness = focus || confirmed ? 2.5f + flash * 2f : (enhancedRim ? 1.8f : 1.5f);
+            if (rimCaptured)
+            {
+                panel.accents = enhancedRim ? originalAccents | HUDPanel.CornerAccents.TopLeft | HUDPanel.CornerAccents.BottomRight : originalAccents;
+                panel.accentLength = enhancedRim ? Mathf.Max(originalAccentLength, 27f) : originalAccentLength;
+            }
             panel.Refresh();
         }
         // Confirmation is communicated by the green frame and the particle burst.

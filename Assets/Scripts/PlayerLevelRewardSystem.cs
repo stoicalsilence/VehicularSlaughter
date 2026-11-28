@@ -258,6 +258,22 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float legendaryRayOpacity = .28f;
     [SerializeField, Min(.01f)] private float celebrationDuration = .85f;
 
+    [Header("Progression Atmosphere (v1.4)")]
+    [SerializeField] private bool ambientProgression = true;
+    [SerializeField] private Color atmosphereColor = new Color32(112, 231, 237, 255);
+    [SerializeField, Range(0, 64)] private int ambientSparkCount = 36;
+    [SerializeField, Range(0f, 1f)] private float ambientSparkOpacity = .55f;
+    [SerializeField, Range(0f, 1f)] private float ambientRayOpacity = .10f;
+    [SerializeField] private bool confirmationShockwave = true;
+    [SerializeField, Range(0f, 1f)] private float shockwaveOpacity = .65f;
+    [SerializeField, Range(0f, .2f)] private float confirmationNumberPunch = .10f;
+    [SerializeField] private bool enhancedCardRims = true;
+    [SerializeField] private bool improveMenuContrast = true;
+    [SerializeField, Range(0f, 1f)] private float minimumBackgroundOpacity = .78f;
+    [Tooltip("Fade the full-screen background without scaling it. Card reveal animation is retained.")]
+    [SerializeField] private bool stationaryMenuBackground = true;
+    private HUDRewardAtmosphere rewardAtmosphere;
+
     [Header("Reward Queue")]
     [Tooltip("Keep unspent levels when no useful reward remains. Retry through RetryPendingChoices when stats change.")]
     [SerializeField] private bool retainUnofferableChoices;
@@ -736,6 +752,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             canvasGroup.alpha = 1f;
             canvasGroup.interactable = false;
             canvasGroup.blocksRaycasts = false;
+            SetupRewardAtmosphere();
             choicePanel.SetActive(false);
         }
 
@@ -763,6 +780,41 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         NormalizeRewardList(vehicleRewards);
         initialized = true;
     }
+
+    // Build one non-interactive graphic behind the existing cards. No editor rebuild.
+    private void SetupRewardAtmosphere()
+    {
+        if (choicePanel == null || !(choicePanel.transform is RectTransform)) return;
+        bool hasTacticalCard = false;
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            HUDRewardCard card = At(tacticalCards, i);
+            if (card != null && card.transform.IsChildOf(choicePanel.transform))
+                hasTacticalCard = true;
+        }
+        if (!hasTacticalCard) return;
+        var go = new GameObject("ProgressionAtmosphere (Runtime)", typeof(RectTransform), typeof(CanvasRenderer));
+        go.layer = choicePanel.layer;
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(choicePanel.transform, false);
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = rt.offsetMax = Vector2.zero;
+        rt.SetAsFirstSibling();
+        rewardAtmosphere = go.AddComponent<HUDRewardAtmosphere>();
+        rewardAtmosphere.raycastTarget = false;
+        if (improveMenuContrast)
+        {
+            Image scrim = choicePanel.GetComponent<Image>();
+            if (scrim != null)
+            {
+                Color c = scrim.color;
+                c.a = Mathf.Max(c.a, minimumBackgroundOpacity);
+                scrim.color = c;
+            }
+        }
+    }
+
+    private bool KeepBackgroundStationary => stationaryMenuBackground && rewardAtmosphere != null;
 
     private void OnEnable()
     {
@@ -988,12 +1040,18 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         SaveAndPauseGame();
         KillMenuTween();
         ClearMenuFocus();
-        choicePanel.transform.localScale = continuing ? panelOpenScale : panelOpenScale * startScale;
+        choicePanel.transform.localScale = continuing || KeepBackgroundStationary ? panelOpenScale : panelOpenScale * startScale;
         canvasGroup.alpha = continuing ? 1f : 0f;
         canvasGroup.interactable = false;
         canvasGroup.blocksRaycasts = true;
         choicePanel.SetActive(true);
-        if (firstOfferInSession) PlayOptional(menuOpenSound, menuOpenVolume);
+        if (firstOfferInSession)
+        {
+            if (rewardAtmosphere != null)
+                rewardAtmosphere.Begin(atmosphereColor, ambientProgression, ambientSparkCount,
+                    ambientRayOpacity, ambientSparkOpacity, confirmationShockwave);
+            PlayOptional(menuOpenSound, menuOpenVolume);
+        }
         SetRewardButtonsInteractable(false);
         UpdateCardUI();
         SetRewardButtonsInteractable(false);
@@ -1006,7 +1064,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         menuSequence = DOTween.Sequence().SetUpdate(true);
         if (!continuing)
         {
-            menuSequence.Join(choicePanel.transform.DOScale(panelOpenScale, openDuration).SetEase(Ease.OutCubic));
+            if (!KeepBackgroundStationary)
+                menuSequence.Join(choicePanel.transform.DOScale(panelOpenScale, openDuration).SetEase(Ease.OutCubic));
             menuSequence.Join(canvasGroup.DOFade(1f, openDuration).SetEase(Ease.OutQuad));
         }
         else
@@ -1531,6 +1590,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             HUDRewardCard tactical = At(tacticalCards, i);
             if (tactical != null)
             {
+                tactical.SetEnhancedRim(enhancedCardRims);
                 tactical.Bind(target, option.statName, option.rarity, amount, comparison,
                     accent, targetColor, titleColor, improvementColor);
                 tactical.SetFocusSound(PlayCardHoverSound);
@@ -1730,7 +1790,22 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             }
             if (confirmedCard != null)
             {
-                confirmedCard.AddConfirmation(menuSequence, hold, confirmationPunchStrength, confirmationFlashStrength);
+                confirmedCard.AddConfirmation(menuSequence, hold, confirmationPunchStrength,
+                    confirmationFlashStrength, confirmationNumberPunch);
+                if (rewardAtmosphere != null)
+                {
+                    Color ringTint = atmosphereColor;
+                    for (int i = 0; i < MaxChoiceCount; i++)
+                    {
+                        if (At(tacticalCards, i) != confirmedCard || currentOptions[i] == null) continue;
+                        ItemRarity tier = currentOptions[i].rarity;
+                        if (tier == ItemRarity.Epic || tier == ItemRarity.Legendary)
+                            ringTint = GetRarityColor(tier);
+                        break;
+                    }
+                    rewardAtmosphere.Shockwave((RectTransform)confirmedCard.transform,
+                        Mathf.Min(.44f, hold + duration), shockwaveOpacity, ringTint);
+                }
                 for (int i = 0; i < MaxChoiceCount; i++)
                 {
                     HUDRewardCard card = At(tacticalCards, i);
@@ -1754,9 +1829,15 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             }
             else
             {
-                menuSequence.Append(choicePanel.transform
-                    .DOScale(panelOpenScale * startScale, duration).SetEase(Ease.InBack));
-                menuSequence.Join(canvasGroup.DOFade(0f, duration).SetEase(Ease.InQuad));
+                // Fade the scrim at full size; never expose its edges during closing.
+                if (KeepBackgroundStationary)
+                    menuSequence.Append(canvasGroup.DOFade(0f, duration).SetEase(Ease.InQuad));
+                else
+                {
+                    menuSequence.Append(choicePanel.transform
+                        .DOScale(panelOpenScale * startScale, duration).SetEase(Ease.InBack));
+                    menuSequence.Join(canvasGroup.DOFade(0f, duration).SetEase(Ease.InQuad));
+                }
             }
         }
         menuSequence.OnComplete(() => FinishClosingOffer(continuing));
@@ -1787,6 +1868,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     private void HideChoicePanel()
     {
+        if (rewardAtmosphere != null) rewardAtmosphere.Stop();
         if (celebrationRays != null) celebrationRays.Clear();
         if (choicePanel != null)
         {
@@ -1870,6 +1952,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         KillMenuTween();
         ClearMenuFocus();
         completionSoundPending = false;
+        if (rewardAtmosphere != null) rewardAtmosphere.Stop();
         if (celebrationRays != null) celebrationRays.Clear();
         inputReady = false;
 

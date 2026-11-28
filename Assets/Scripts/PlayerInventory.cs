@@ -274,7 +274,7 @@ public sealed class PlayerInventory : MonoBehaviour
     [Header("Banishes")]
     [Min(0)]
     [SerializeField] private int startingBanishes = 1;
-    
+
     [Header("Runtime Inventory")]
     public List<ItemStack> ownedItems =
         new List<ItemStack>();
@@ -341,6 +341,10 @@ public sealed class PlayerInventory : MonoBehaviour
     [SerializeField] private Button discardButton;
     [SerializeField] private Button banishButton;
 
+    [Header("Optional Tactical Discovery HUD")]
+    [SerializeField] private HUDItemDiscovery discoveryHUD;
+    private bool resolvingChoice;
+
     [Header("Choice Menu Animation")]
     [SerializeField, Min(0f)] private float menuOpenDuration = 0.3f;
     [SerializeField, Min(0f)] private float menuCloseDuration = 0.2f;
@@ -402,6 +406,8 @@ public sealed class PlayerInventory : MonoBehaviour
         }
 
         banishesRemaining = Mathf.Max(0, startingBanishes);
+        if (discoveryHUD != null && discoveryHUD.gameObject != choicePanel)
+            discoveryHUD = null;
 
         if (choicePanel != null)
         {
@@ -441,10 +447,9 @@ public sealed class PlayerInventory : MonoBehaviour
         if (!isOpen || previewInstance == null)
             return;
 
-        previewInstance.transform.Rotate(
-            Vector3.up,
-            previewRotationSpeed * Time.unscaledDeltaTime,
-            Space.World);
+        float angle = previewRotationSpeed * Time.unscaledDeltaTime;
+        if (discoveryHUD != null) discoveryHUD.RotatePreview(previewInstance.transform, angle);
+        else previewInstance.transform.Rotate(Vector3.up, angle, Space.World);
     }
 
     // ==================================================
@@ -456,8 +461,11 @@ public sealed class PlayerInventory : MonoBehaviour
         if (isOpen || isClosing || crate == null || choicePanel == null)
             return false;
 
-        int index = UnityEngine.Random.Range(0, breakCrateSounds.Length); 
-        AudioManager.Play2D(breakCrateSounds[index], 0.6f);
+        if (breakCrateSounds != null && breakCrateSounds.Length > 0)
+        {
+            int index = UnityEngine.Random.Range(0, breakCrateSounds.Length);
+            if (breakCrateSounds[index] != null) AudioManager.Play2D(breakCrateSounds[index], 0.6f);
+        }
 
         ItemDefinition item = RollItem();
 
@@ -664,7 +672,7 @@ public sealed class PlayerInventory : MonoBehaviour
 
     public bool HasItemByName(string itemName)
     {
-        foreach(ItemStack item in ownedItems)
+        foreach (ItemStack item in ownedItems)
         {
             if (item.definition.displayName.Equals(itemName))
             {
@@ -763,7 +771,7 @@ public sealed class PlayerInventory : MonoBehaviour
         {
             //for nones i set one time trigger items
             case PlayerStatToModify.None:
-                if(itemName.Equals("An Actual Rabbit"))
+                if (itemName.Equals("An Actual Rabbit"))
                 {
                     FindObjectOfType<Q3Movement.Q3PlayerController>().m_AutoBunnyHop = true;
                 }
@@ -1288,7 +1296,7 @@ public sealed class PlayerInventory : MonoBehaviour
                 break;
 
             case PlayerStatToModify.RadioAirstrikeScale:
-                s.radioAirstrikeScale= Mathf.Max(0, value);
+                s.radioAirstrikeScale = Mathf.Max(0, value);
                 break;
 
             case PlayerStatToModify.RadioAirstrikeDelay:
@@ -1385,16 +1393,16 @@ public sealed class PlayerInventory : MonoBehaviour
         switch (item.rarity)
         {
             case ItemRarity.Common:
-                AudioManager.Play2D(getCommonSound);
+                if (getCommonSound != null) AudioManager.Play2D(getCommonSound);
                 break;
             case ItemRarity.Rare:
-                AudioManager.Play2D(getRareSound);
+                if (getRareSound != null) AudioManager.Play2D(getRareSound);
                 break;
             case ItemRarity.Epic:
-                AudioManager.Play2D(getEpicSound);
+                if (getEpicSound != null) AudioManager.Play2D(getEpicSound);
                 break;
             case ItemRarity.Legendary:
-                AudioManager.Play2D(getLegendarySound);
+                if (getLegendarySound != null) AudioManager.Play2D(getLegendarySound);
                 break;
         }
 
@@ -1409,22 +1417,34 @@ public sealed class PlayerInventory : MonoBehaviour
         menuSequence?.Kill();
 
         choicePanel.SetActive(true);
-        choicePanel.transform.localScale = choicePanelOpenScale * menuStartScale;
+        Transform motion = discoveryHUD != null ? discoveryHUD.Motion : choicePanel.transform;
+        Vector3 fullScale = discoveryHUD != null ? Vector3.one : choicePanelOpenScale;
+        motion.localScale = fullScale * menuStartScale;
+        if (discoveryHUD != null)
+        {
+            discoveryHUD.Prepare(item, GetStackCount(item), banishesRemaining, previewInstance != null);
+            discoveryHUD.Reveal(menuOpenDuration);
+        }
 
         if (choiceCanvasGroup != null)
         {
             choiceCanvasGroup.alpha = 0f;
-            choiceCanvasGroup.interactable = true;
+            choiceCanvasGroup.interactable = discoveryHUD == null;
             choiceCanvasGroup.blocksRaycasts = true;
         }
 
         // SetUpdate(true) makes this sequence use unscaled time while Time.timeScale is 0.
         menuSequence = DOTween.Sequence().SetUpdate(true);
         menuSequence.Join(
-            choicePanel.transform
-                .DOScale(choicePanelOpenScale, menuOpenDuration)
-                .SetEase(menuOpenEase)).OnComplete( () => {
-                    AudioManager.Play2D(choirSound);
+            motion.DOScale(fullScale, Mathf.Max(.001f, menuOpenDuration))
+                .SetEase(menuOpenEase)).OnComplete(() =>
+                {
+                    if (choirSound != null) AudioManager.Play2D(choirSound);
+                    if (discoveryHUD != null && isOpen && !isClosing)
+                    {
+                        if (choiceCanvasGroup != null) choiceCanvasGroup.interactable = true;
+                        discoveryHUD.RevealComplete();
+                    }
                 });
 
         if (choiceCanvasGroup != null)
@@ -1449,21 +1469,21 @@ public sealed class PlayerInventory : MonoBehaviour
         if (rarityText != null)
             rarityText.text = offeredItem.rarity.ToString();
 
-        switch (offeredItem.rarity)
-        {
-            case ItemRarity.Common:
-                rarityText.color = Color.white;
-                break;
-            case ItemRarity.Rare:
-                rarityText.color = Color.blue;
-                break;
-            case ItemRarity.Epic:
-                rarityText.color = Color.magenta;
-                break;
-            case ItemRarity.Legendary:
-                rarityText.color = Color.yellow;
-                break;
-        }
+        if (rarityText != null) switch (offeredItem.rarity)
+            {
+                case ItemRarity.Common:
+                    rarityText.color = Color.white;
+                    break;
+                case ItemRarity.Rare:
+                    rarityText.color = Color.blue;
+                    break;
+                case ItemRarity.Epic:
+                    rarityText.color = Color.magenta;
+                    break;
+                case ItemRarity.Legendary:
+                    rarityText.color = Color.yellow;
+                    break;
+            }
 
         if (descriptionText != null)
         {
@@ -1523,7 +1543,8 @@ public sealed class PlayerInventory : MonoBehaviour
 
         // A 3D preview is optional. The choice menu can still be used without one.
         if (offeredItem == null || offeredItem.previewPrefab == null ||
-            previewImage == null || previewCamera == null || previewRoot == null)
+            previewImage == null || previewCamera == null || previewRoot == null ||
+            (discoveryHUD != null && previewCamera.targetTexture == null))
             return;
 
         previewInstance = Instantiate(
@@ -1536,6 +1557,7 @@ public sealed class PlayerInventory : MonoBehaviour
 
         SetLayerRecursively(previewInstance.transform, previewLayer);
 
+        if (discoveryHUD != null) discoveryHUD.FitPreview(previewInstance, previewCamera);
         previewCamera.cullingMask = 1 << previewLayer;
         previewCamera.enabled = true;
         previewImage.texture = previewCamera.targetTexture;
@@ -1552,6 +1574,7 @@ public sealed class PlayerInventory : MonoBehaviour
 
     private void DestroyPreview()
     {
+        if (discoveryHUD != null) discoveryHUD.RestorePreview();
         if (previewInstance != null)
         {
             Destroy(previewInstance);
@@ -1566,51 +1589,57 @@ public sealed class PlayerInventory : MonoBehaviour
     // PLAYER CHOICES
     // ==================================================
 
+    private bool CanResolveChoice => isOpen && !isClosing && !resolvingChoice &&
+        (discoveryHUD == null || discoveryHUD.Ready);
+
     private void CollectCurrentItem()
     {
-        if (!isOpen)
-            return;
-
-        if (CollectItem(offeredItem))
-            ResolveChoice();
-
-        AudioManager.Play2D(takeItemSound);
+        if (!CanResolveChoice) return;
+        resolvingChoice = true;
+        try
+        {
+            if (CollectItem(offeredItem))
+            {
+                if (takeItemSound != null) AudioManager.Play2D(takeItemSound);
+                ResolveChoice(HUDItemDecision.Collect);
+            }
+        }
+        finally { resolvingChoice = false; }
     }
 
     private void DiscardCurrentItem()
     {
-        if (!isOpen)
-            return;
-
-        // Discarding does not banish the item.
-        ResolveChoice();
+        if (!CanResolveChoice) return;
+        ResolveChoice(HUDItemDecision.Discard);
     }
 
     private void BanishCurrentItem()
     {
-        if (!isOpen)
-            return;
-
-        if (BanishItem(offeredItem))
-            ResolveChoice();
+        if (!CanResolveChoice) return;
+        resolvingChoice = true;
+        try
+        {
+            if (BanishItem(offeredItem)) ResolveChoice(HUDItemDecision.Banish);
+        }
+        finally { resolvingChoice = false; }
     }
 
     // ==================================================
     // CLOSE MENU
     // ==================================================
 
-    private void ResolveChoice()
+    private void ResolveChoice(HUDItemDecision decision)
     {
         ItemCrate crate = sourceCrate;
 
-        CloseMenu(() =>
+        CloseMenu(decision, () =>
         {
             if (crate != null)
                 crate.CompleteChoice();
         });
     }
 
-    private void CloseMenu(Action onClosed = null)
+    private void CloseMenu(HUDItemDecision decision, Action onClosed = null)
     {
         if (!isOpen)
             return;
@@ -1626,10 +1655,19 @@ public sealed class PlayerInventory : MonoBehaviour
             return;
         }
 
+        float hold = 0f;
+        Transform motion = choicePanel.transform;
+        Vector3 fullScale = choicePanelOpenScale;
+        if (discoveryHUD != null)
+        {
+            if (choiceCanvasGroup != null) choiceCanvasGroup.interactable = false;
+            hold = discoveryHUD.Confirm(decision, GetStackCount(offeredItem), banishesRemaining);
+            motion = discoveryHUD.Motion;
+            fullScale = Vector3.one;
+        }
         menuSequence = DOTween.Sequence().SetUpdate(true);
-        menuSequence.Join(
-            choicePanel.transform
-                .DOScale(choicePanelOpenScale * menuStartScale, menuCloseDuration)
+        if (hold > 0f) menuSequence.AppendInterval(hold);
+        menuSequence.Append(motion.DOScale(fullScale * menuStartScale, Mathf.Max(.001f, menuCloseDuration))
                 .SetEase(menuCloseEase));
 
         if (choiceCanvasGroup != null)
@@ -1646,6 +1684,7 @@ public sealed class PlayerInventory : MonoBehaviour
             {
                 choicePanel.SetActive(false);
                 choicePanel.transform.localScale = choicePanelOpenScale;
+                if (discoveryHUD != null) discoveryHUD.Motion.localScale = Vector3.one;
             }
 
             if (choiceCanvasGroup != null)
@@ -1820,6 +1859,7 @@ public sealed class PlayerInventory : MonoBehaviour
         isClosing = false;
         RestoreGameState();
         DestroyPreview();
+        if (discoveryHUD != null && choicePanel != null) choicePanel.SetActive(false);
     }
 
 
