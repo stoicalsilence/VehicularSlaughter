@@ -9,6 +9,7 @@ public sealed class ForbiddenTome : MonoBehaviour
     private static readonly List<ForbiddenTome> activeTomes =
         new List<ForbiddenTome>();
 
+    public HUDCompassMarker compassMarker;
     public static IReadOnlyList<ForbiddenTome> ActiveTomes =>
         activeTomes;
 
@@ -191,6 +192,8 @@ public sealed class ForbiddenTome : MonoBehaviour
                 transform.position
             );
         }
+
+        compassMarker.enabled = false;
     }
 
     private void OnDrawGizmosSelected()

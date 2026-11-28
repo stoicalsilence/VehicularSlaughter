@@ -235,6 +235,29 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     [SerializeField] private TextMeshProUGUI currentLevelText;
     [SerializeField] private string currentLevelPrefix = "LEVEL ";
 
+    [Header("Tactical Card Presentation (Optional)")]
+    [SerializeField] private HUDRewardCard[] tacticalCards = new HUDRewardCard[3];
+    [SerializeField, Range(0f, 0.6f)] private float selectionHoldSeconds = 0.28f;
+    [SerializeField] private bool rareRevealParticles = true;
+
+    [Header("Selection Impact")]
+    [Tooltip("Scale overshoot of the entire selected card. Zero disables the punch.")]
+    [SerializeField, Range(0f, 0.15f)] private float confirmationPunchStrength = 0.06f;
+    [Tooltip("Brief white rim flash on successful application. Zero disables the flash.")]
+    [SerializeField, Range(0f, 1f)] private float confirmationFlashStrength = 0.8f;
+    [Tooltip("Opacity of other cards during the selection hold. One disables dimming.")]
+    [SerializeField, Range(0f, 1f)] private float unchosenCardOpacity = 0.45f;
+
+    [Header("Celebration (Optional)")]
+    [SerializeField] private HUDRadialRays celebrationRays;
+    [SerializeField] private bool celebrateMenuOpening = true;
+    [SerializeField] private bool celebrateHighRarity = true;
+    [SerializeField] private bool rarityCardShine = true;
+    [SerializeField, Range(0f, 1f)] private float openingRayOpacity = .10f;
+    [SerializeField, Range(0f, 1f)] private float epicRayOpacity = .14f;
+    [SerializeField, Range(0f, 1f)] private float legendaryRayOpacity = .28f;
+    [SerializeField, Min(.01f)] private float celebrationDuration = .85f;
+
     [Header("Reward Queue")]
     [Tooltip("Keep unspent levels when no useful reward remains. Retry through RetryPendingChoices when stats change.")]
     [SerializeField] private bool retainUnofferableChoices;
@@ -270,10 +293,24 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
     [Header("Audio")]
     [SerializeField] private AudioClip rewardSelectedSound;
+    [Tooltip("Optional: plays once when an offer containing an Epic reward finishes revealing.")]
+    [SerializeField] private AudioClip epicRevealSound;
+    [Tooltip("Optional: takes precedence over the Epic sound when both are offered.")]
+    [SerializeField] private AudioClip legendaryRevealSound;
+    [SerializeField, Range(0f, 1f)] private float rarityRevealVolume = 0.45f;
 
     // ==================================================
     // RUNTIME STATE
     // ==================================================
+
+    [Header("Additional UI Audio (Optional)")]
+    [SerializeField] private AudioClip menuOpenSound, cardHoverSound, queueCompleteSound;
+    [SerializeField, Range(0f, 1f)] private float menuOpenVolume = .35f;
+    [SerializeField, Range(0f, 1f)] private float cardHoverVolume = .15f;
+    [SerializeField, Range(0f, 1f)] private float queueCompleteVolume = .4f;
+    [SerializeField, Min(0f)] private float hoverSoundInterval = .075f;
+    private float nextHoverSoundTime;
+    private bool firstOfferInSession, completionSoundPending;
 
     private const int MaxChoiceCount = 3;
     private const float StatEpsilon = 0.0001f;
@@ -294,10 +331,14 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
     private float previousTimeScale;
     private CursorLockMode previousCursorLock;
     private bool previousCursorVisible;
+    private GameObject hiddenRadioUI;
+    private bool previousRadioActive;
 
     private CanvasGroup canvasGroup;
     private Vector3 panelOpenScale = Vector3.one;
     private Sequence menuSequence;
+    private readonly List<RaycastResult> pointerHits = new List<RaycastResult>(16);
+    private Vector2 lastPointerPosition;
 
     public int PendingChoices => pendingChoices;
     public PlayerLevelSystem LevelSystem => levelSystem;
@@ -683,6 +724,9 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
         if (choicePanel != null)
         {
+            // v1.0 generated hierarchy: hide the redundant heading without rebuilding.
+            Transform eyebrow = choicePanel.transform.Find("Content/Eyebrow");
+            if (eyebrow != null) eyebrow.gameObject.SetActive(false);
             panelOpenScale = choicePanel.transform.localScale;
             canvasGroup = choicePanel.GetComponent<CanvasGroup>();
 
@@ -890,6 +934,7 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         if (!HasValidUI() || !listenersRegistered || inventory == null)
         {
             Debug.LogError("PlayerLevelRewardSystem: Reward UI or inventory is missing.", this);
+            HideChoicePanel();
             RestoreGameState();
             return;
         }
@@ -927,22 +972,30 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             if (!retainUnofferableChoices)
                 pendingChoices = 0;
             UpdateRemainingChoicesText();
+            HideChoicePanel();
             RestoreGameState();
             return;
         }
 
+        // The root stays visible throughout a queue. Only the cards are revealed again.
+        bool continuing = hasSavedGameState && choicePanel.activeSelf;
+        firstOfferInSession = !continuing;
+        completionSoundPending = false;
+        if (celebrationRays != null) celebrationRays.Clear();
         isShowing = true;
         isClosing = false;
         inputReady = false;
         SaveAndPauseGame();
         KillMenuTween();
-        radioUI.SetActive(false);
-        choicePanel.SetActive(true);
-        UpdateCardUI();
-        choicePanel.transform.localScale = panelOpenScale * startScale;
-        canvasGroup.alpha = 0f;
+        ClearMenuFocus();
+        choicePanel.transform.localScale = continuing ? panelOpenScale : panelOpenScale * startScale;
+        canvasGroup.alpha = continuing ? 1f : 0f;
         canvasGroup.interactable = false;
         canvasGroup.blocksRaycasts = true;
+        choicePanel.SetActive(true);
+        if (firstOfferInSession) PlayOptional(menuOpenSound, menuOpenVolume);
+        SetRewardButtonsInteractable(false);
+        UpdateCardUI();
         SetRewardButtonsInteractable(false);
 
         if (openDuration <= 0f)
@@ -951,8 +1004,24 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             return;
         }
         menuSequence = DOTween.Sequence().SetUpdate(true);
-        menuSequence.Join(choicePanel.transform.DOScale(panelOpenScale, openDuration).SetEase(Ease.OutCubic));
-        menuSequence.Join(canvasGroup.DOFade(1f, openDuration).SetEase(Ease.OutQuad));
+        if (!continuing)
+        {
+            menuSequence.Join(choicePanel.transform.DOScale(panelOpenScale, openDuration).SetEase(Ease.OutCubic));
+            menuSequence.Join(canvasGroup.DOFade(1f, openDuration).SetEase(Ease.OutQuad));
+        }
+        else
+        {
+            // Keeps the sequence valid even with legacy cards or missing visual references.
+            menuSequence.AppendInterval(openDuration);
+        }
+        // Stagger within the original opening time; input still unlocks on completion.
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            HUDRewardCard card = At(tacticalCards, i);
+            if (currentOptions[i] == null || card == null) continue;
+            float offset = openDuration * 0.18f * i;
+            card.AddReveal(menuSequence, offset, openDuration - offset);
+        }
         menuSequence.OnComplete(FinishOpeningOffer);
     }
 
@@ -965,9 +1034,120 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         inputReady = true;
         canvasGroup.interactable = true;
         SetRewardButtonsInteractable(true);
-        if (EventSystem.current != null)
+        for (int i = 0; i < MaxChoiceCount; i++)
         {
-            EventSystem.current.SetSelectedGameObject(rewardButtons[0].gameObject);
+            HUDRewardCard card = At(tacticalCards, i);
+            if (currentOptions[i] == null || card == null) continue;
+            card.FinishReveal();
+            if (rareRevealParticles) card.PlayRareReveal();
+            if (rarityCardShine) card.PlayRarityShine();
+        }
+        // No default selection: highlight the actual card under the mouse, if any.
+        RefreshPointerFocus();
+        PlayOfferRevealSound();
+        PlayCelebration();
+    }
+
+    private static void PlayOptional(AudioClip clip, float volume)
+    {
+        if (clip != null && volume > 0f) AudioManager.Play2D(clip, Mathf.Clamp01(volume));
+    }
+
+    private void PlayCardHoverSound()
+    {
+        if (!CanChoose || cardHoverSound == null || cardHoverVolume <= 0f || Time.unscaledTime < nextHoverSoundTime) return;
+        nextHoverSoundTime = Time.unscaledTime + Mathf.Max(0f, hoverSoundInterval);
+        PlayOptional(cardHoverSound, cardHoverVolume);
+    }
+
+    private void PlayCelebration()
+    {
+        if (celebrationRays == null) return;
+        bool epic = false, legendary = false;
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            RewardOption option = currentOptions[i];
+            if (option == null) continue;
+            epic |= option.rarity == ItemRarity.Epic;
+            legendary |= option.rarity == ItemRarity.Legendary;
+        }
+        if (celebrateHighRarity && legendary)
+            celebrationRays.Play(legendaryColor, legendaryRayOpacity, celebrationDuration, true);
+        else if (celebrateHighRarity && epic)
+            celebrationRays.Play(epicColor, epicRayOpacity, celebrationDuration * .8f, true);
+        else if (firstOfferInSession && celebrateMenuOpening)
+            celebrationRays.Play(playerAccent, openingRayOpacity, celebrationDuration * .7f, true);
+    }
+
+    private void PlayOfferRevealSound()
+    {
+        // Independent of the optional particle/card references. At most one clip per offer.
+        // If a Legendary clip is not assigned, an offered Epic may still use its own clip.
+        if (rarityRevealVolume <= 0f) return;
+        bool epic = false, legendary = false;
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            RewardOption option = currentOptions[i];
+            if (option == null) continue;
+            if (option.rarity == ItemRarity.Legendary) legendary = true;
+            else if (option.rarity == ItemRarity.Epic) epic = true;
+        }
+        AudioClip clip = legendary && legendaryRevealSound != null ? legendaryRevealSound :
+            epic && epicRevealSound != null ? epicRevealSound : null;
+        if (clip != null) AudioManager.Play2D(clip, Mathf.Clamp01(rarityRevealVolume));
+    }
+
+    private void RefreshPointerFocus(bool forceLayout = true)
+    {
+        EventSystem es = EventSystem.current;
+        if (es == null || !CanChoose) return;
+        // A stationary pointer may not produce a new enter event when cards are rebound.
+        if (forceLayout) Canvas.ForceUpdateCanvases();
+        pointerHits.Clear();
+        lastPointerPosition = Input.mousePosition;
+        var pointer = new PointerEventData(es) { position = lastPointerPosition };
+        es.RaycastAll(pointer, pointerHits);
+        HUDRewardCard hit = pointerHits.Count > 0 && pointerHits[0].gameObject != null
+            ? pointerHits[0].gameObject.GetComponentInParent<HUDRewardCard>() : null;
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            HUDRewardCard card = At(tacticalCards, i);
+            if (card != null && card.isActiveAndEnabled) card.SetPointerHover(card == hit, false);
+        }
+        pointerHits.Clear();
+    }
+
+    // Keyboard users can explicitly enter navigation with an arrow key. No implicit
+    // first-card selection; normal EventSystem navigation handles subsequent moves.
+    private void LateUpdate()
+    {
+        if (!CanChoose || EventSystem.current == null) return;
+        GameObject selected = EventSystem.current.currentSelectedGameObject;
+        bool menuSelected = selected != null && selected.transform.IsChildOf(choicePanel.transform);
+        Vector2 pointerPosition = Input.mousePosition;
+        if (pointerPosition != lastPointerPosition)
+        {
+            lastPointerPosition = pointerPosition;
+            // Mouse movement takes precedence over a previous keyboard selection.
+            // Normally pointer enter/exit handles this; re-raycast only when taking
+            // over from keyboard focus (including movement inside the same card).
+            if (menuSelected)
+            {
+                ClearMenuFocus();
+                RefreshPointerFocus(false);
+                return;
+            }
+        }
+        if (menuSelected) return;
+        bool reverse = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.UpArrow);
+        if (!reverse && !Input.GetKeyDown(KeyCode.RightArrow) && !Input.GetKeyDown(KeyCode.DownArrow)) return;
+        for (int n = 0; n < MaxChoiceCount; n++)
+        {
+            int index = reverse ? MaxChoiceCount - 1 - n : n;
+            Button candidate = At(rewardButtons, index);
+            if (candidate == null || !candidate.isActiveAndEnabled || !candidate.IsInteractable()) continue;
+            EventSystem.current.SetSelectedGameObject(candidate.gameObject);
+            break;
         }
     }
 
@@ -1348,6 +1528,15 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             string green = ColorUtility.ToHtmlStringRGB(improvementColor);
             string comparison = $"{before}  ->  <color=#{green}>{after}</color>";
 
+            HUDRewardCard tactical = At(tacticalCards, i);
+            if (tactical != null)
+            {
+                tactical.Bind(target, option.statName, option.rarity, amount, comparison,
+                    accent, targetColor, titleColor, improvementColor);
+                tactical.SetFocusSound(PlayCardHoverSound);
+                continue;
+            }
+
             if (name != null)
             {
                 name.richText = true;
@@ -1389,8 +1578,12 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         if (rewardButtons != null)
         {
             for (int i = 0; i < Mathf.Min(MaxChoiceCount, rewardButtons.Length); i++)
+            {
                 if (rewardButtons[i] != null)
                     rewardButtons[i].interactable = value && i < offeredChoiceCount && currentOptions[i] != null;
+                HUDRewardCard card = At(tacticalCards, i);
+                if (card != null && card.isActiveAndEnabled) card.RefreshInteractionState();
+            }
         }
     }
 
@@ -1452,12 +1645,23 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         }
         if (!applied)
         {
-            if (isShowing && inputReady) SetRewardButtonsInteractable(true);
+            if (isShowing && inputReady)
+            {
+                SetRewardButtonsInteractable(true);
+                RefreshPointerFocus();
+            }
             Debug.LogWarning("PlayerLevelRewardSystem: Could not apply selected reward. Check inventory stat mapping.", this);
             return;
         }
         // Applying a stat may invoke other game callbacks (including disabling this component).
-        ConsumeChoice();
+        float hold = 0f;
+        HUDRewardCard card = At(tacticalCards, index);
+        if (isActiveAndEnabled && isShowing && card != null)
+        {
+            card.Confirm();
+            hold = Mathf.Max(0f, selectionHoldSeconds);
+        }
+        ConsumeChoice(hold);
     }
 
     private bool IsOfferCurrent(RewardOption option)
@@ -1469,81 +1673,131 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             Mathf.Abs(value - option.originalValue) <= StatEpsilon;
     }
 
-    private void ConsumeChoice()
+    private void ConsumeChoice(float hold = 0f)
     {
         pendingChoices = Mathf.Max(0, pendingChoices - 1);
+        completionSoundPending = pendingChoices == 0;
         UpdateRemainingChoicesText();
-        if (isActiveAndEnabled && isShowing) BeginClose();
+        if (isActiveAndEnabled && isShowing) BeginClose(hold);
         else if (isActiveAndEnabled && !isClosing && pendingChoices > 0) ShowNextOffer();
         if (rewardSelectedSound != null) AudioManager.Play2D(rewardSelectedSound);
     }
 
-    private void BeginClose()
+    private void BeginClose(float hold = 0f)
     {
         isShowing = false;
         isClosing = true;
         inputReady = false;
         SetRewardButtonsInteractable(false);
         canvasGroup.interactable = false;
-        CloseCurrentOffer();
+        if (celebrationRays != null) celebrationRays.Clear();
+        for (int i = 0; i < MaxChoiceCount; i++)
+        {
+            HUDRewardCard card = At(tacticalCards, i);
+            if (card != null) card.ClearRarityShine();
+        }
+        CloseCurrentOffer(hold);
     }
 
     // ==================================================
     // MENU ANIMATION
     // ==================================================
 
-    private void CloseCurrentOffer()
+    private void CloseCurrentOffer(float hold)
     {
         KillMenuTween();
-        if (closeDuration <= 0f)
+        bool continuing = pendingChoices > 0;
+        float duration = Mathf.Max(0f, closeDuration);
+        if (duration <= 0f && hold <= 0f)
         {
-            FinishClosingOffer();
+            FinishClosingOffer(continuing);
             return;
         }
         menuSequence = DOTween.Sequence().SetUpdate(true);
-
-        menuSequence.Join(
-            choicePanel.transform
-                .DOScale(panelOpenScale * startScale, closeDuration)
-                .SetEase(Ease.InBack));
-
-        menuSequence.Join(
-            canvasGroup
-                .DOFade(0f, closeDuration)
-                .SetEase(Ease.InQuad));
-
-        menuSequence.OnComplete(FinishClosingOffer);
+        if (hold > 0f)
+        {
+            menuSequence.AppendInterval(hold);
+            // A successful selection has one confirmed card. Stale/failed offers do not punch.
+            HUDRewardCard confirmedCard = null;
+            for (int i = 0; i < MaxChoiceCount; i++)
+            {
+                HUDRewardCard card = At(tacticalCards, i);
+                if (currentOptions[i] != null && card != null && card.isActiveAndEnabled && card.IsConfirmed)
+                {
+                    confirmedCard = card;
+                    break;
+                }
+            }
+            if (confirmedCard != null)
+            {
+                confirmedCard.AddConfirmation(menuSequence, hold, confirmationPunchStrength, confirmationFlashStrength);
+                for (int i = 0; i < MaxChoiceCount; i++)
+                {
+                    HUDRewardCard card = At(tacticalCards, i);
+                    if (currentOptions[i] != null && card != null && card != confirmedCard && card.isActiveAndEnabled)
+                        card.AddUnchosenDim(menuSequence, hold, unchosenCardOpacity);
+                }
+            }
+        }
+        if (duration > 0f)
+        {
+            if (continuing)
+            {
+                // Fade the old cards, not the scrim/header. Keep the menu blocking clicks.
+                menuSequence.AppendInterval(duration);
+                for (int i = 0; i < MaxChoiceCount; i++)
+                {
+                    HUDRewardCard card = At(tacticalCards, i);
+                    if (currentOptions[i] != null && card != null)
+                        card.AddExit(menuSequence, Mathf.Max(0f, hold), duration);
+                }
+            }
+            else
+            {
+                menuSequence.Append(choicePanel.transform
+                    .DOScale(panelOpenScale * startScale, duration).SetEase(Ease.InBack));
+                menuSequence.Join(canvasGroup.DOFade(0f, duration).SetEase(Ease.InQuad));
+            }
+        }
+        menuSequence.OnComplete(() => FinishClosingOffer(continuing));
     }
 
-    private void FinishClosingOffer()
+    private void FinishClosingOffer(bool continuing)
     {
         menuSequence = null;
         ClearMenuFocus();
+        isClosing = false;
+        Array.Clear(currentOptions, 0, currentOptions.Length);
+        if (continuing && pendingChoices > 0 && isActiveAndEnabled)
+        {
+            // Preserve full background, header, pause and cursor state across offers.
+            ShowNextOffer();
+            return;
+        }
+        HideChoicePanel();
+        if (pendingChoices > 0 && isActiveAndEnabled) ShowNextOffer();
+        else
+        {
+            bool playComplete = completionSoundPending && pendingChoices == 0 && isActiveAndEnabled;
+            completionSoundPending = false;
+            RestoreGameState();
+            if (playComplete) PlayOptional(queueCompleteSound, queueCompleteVolume);
+        }
+    }
+
+    private void HideChoicePanel()
+    {
+        if (celebrationRays != null) celebrationRays.Clear();
         if (choicePanel != null)
         {
             choicePanel.SetActive(false);
-            radioUI.SetActive(true);
             choicePanel.transform.localScale = panelOpenScale;
         }
-
         if (canvasGroup != null)
         {
             canvasGroup.alpha = 1f;
             canvasGroup.interactable = false;
             canvasGroup.blocksRaycasts = false;
-        }
-
-        isClosing = false;
-        Array.Clear(currentOptions, 0, currentOptions.Length);
-
-        if (pendingChoices > 0)
-        {
-            // Keep the original pause state while presenting the next queued level.
-            ShowNextOffer();
-        }
-        else
-        {
-            RestoreGameState();
         }
     }
 
@@ -1559,6 +1813,15 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
             previousCursorLock = Cursor.lockState;
             previousCursorVisible = Cursor.visible;
             hasSavedGameState = true;
+            // Preserve the radio's original visibility through the entire reward queue.
+            if (radioUI != null && !transform.IsChildOf(radioUI.transform) &&
+                !choicePanel.transform.IsChildOf(radioUI.transform) &&
+                !radioUI.transform.IsChildOf(choicePanel.transform))
+            {
+                hiddenRadioUI = radioUI;
+                previousRadioActive = radioUI.activeSelf;
+                radioUI.SetActive(false);
+            }
         }
 
         Time.timeScale = 0f;
@@ -1575,6 +1838,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
         Cursor.lockState = previousCursorLock;
         Cursor.visible = previousCursorVisible;
         hasSavedGameState = false;
+        if (hiddenRadioUI != null) hiddenRadioUI.SetActive(previousRadioActive);
+        hiddenRadioUI = null;
     }
 
     // ==================================================
@@ -1604,6 +1869,8 @@ public sealed class PlayerLevelRewardSystem : MonoBehaviour
 
         KillMenuTween();
         ClearMenuFocus();
+        completionSoundPending = false;
+        if (celebrationRays != null) celebrationRays.Clear();
         inputReady = false;
 
         isShowing = false;

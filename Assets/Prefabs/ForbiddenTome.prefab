@@ -191,6 +191,7 @@ GameObject:
   m_Component:
   - component: {fileID: 3003926812729459222}
   - component: {fileID: 3003926812729459223}
+  - component: {fileID: 6869920665881057316}
   m_Layer: 0
   m_Name: ForbiddenTome
   m_TagString: Untagged
@@ -225,6 +226,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c3f5c67557b958a4c9a3a8ce71de2cde, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  compassMarker: {fileID: 6869920665881057316}
   interactionDistance: 6
   interactionPoint: {fileID: 3331167255120853747}
   xpGainIncrease: 0.25
@@ -237,6 +239,26 @@ MonoBehaviour:
   ambientParticles: {fileID: 3102919938667731924}
   activationSound: {fileID: 8300000, guid: 4f355b3262cd121418a5f5d44f659e58, type: 3}
   exhaustedSound: {fileID: 8300000, guid: 74d7a8b7a5c8f544783b36fece360438, type: 3}
+--- !u!114 &6869920665881057316
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3003926812729459220}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5e3eddbd5db42140ab51babfb625030, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  icon: {fileID: 21300000, guid: f2cd31159b4898846b326a21a23b351a, type: 3}
+  tint: {r: 0.3301887, g: 0.09189214, b: 0.19791767, a: 1}
+  trackingPoint: {fileID: 3331167255120853747}
+  priority: 0
+  maximumDistance: 150
+  minimumDistance: 0.5
+  hideWhileDriving: 0
+  visibleOnCompass: 1
 --- !u!1 &3005187292459501468
 GameObject:
   m_ObjectHideFlags: 0

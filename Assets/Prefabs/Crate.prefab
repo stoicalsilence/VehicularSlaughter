@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 6543534515570788334}
   - component: {fileID: 6543534515570788335}
   - component: {fileID: 6543534515570788336}
+  - component: {fileID: 1304744032884529697}
   m_Layer: 0
   m_Name: Crate
   m_TagString: Untagged
@@ -98,6 +99,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7af319f580cf4fd4981b25cf90cad57b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &1304744032884529697
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6543534515570788339}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5e3eddbd5db42140ab51babfb625030, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  icon: {fileID: 21300000, guid: 5581e66df7c959d49b70b243d78ecd3b, type: 3}
+  tint: {r: 0.7264151, g: 0.43549612, b: 0.2706924, a: 1}
+  trackingPoint: {fileID: 6721046868403087657}
+  priority: 0
+  maximumDistance: 150
+  minimumDistance: 0.5
+  hideWhileDriving: 0
+  visibleOnCompass: 1
 --- !u!1 &6543534515693303674
 GameObject:
   m_ObjectHideFlags: 0

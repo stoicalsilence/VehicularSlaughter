@@ -1439,6 +1439,7 @@ GameObject:
   - component: {fileID: 6011533399049925459}
   - component: {fileID: 6011533399049925458}
   - component: {fileID: 694130760208004287}
+  - component: {fileID: 4588660562690170590}
   m_Layer: 0
   m_Name: CorruptedCrate
   m_TagString: Untagged
@@ -1524,6 +1525,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cab5ad74f9b38ed4e94a526d862c00e1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &4588660562690170590
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6011533399049925454}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5e3eddbd5db42140ab51babfb625030, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  icon: {fileID: 21300000, guid: 5581e66df7c959d49b70b243d78ecd3b, type: 3}
+  tint: {r: 0.6320754, g: 0.22957455, b: 0.41789445, a: 1}
+  trackingPoint: {fileID: 6118132104207555988}
+  priority: 0
+  maximumDistance: 150
+  minimumDistance: 0.5
+  hideWhileDriving: 0
+  visibleOnCompass: 1
 --- !u!1 &6011533400551852587
 GameObject:
   m_ObjectHideFlags: 0

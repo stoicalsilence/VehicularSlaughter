@@ -25,6 +25,14 @@ public sealed class HUDCycleProgress : MonoBehaviour
     [SerializeField] private bool flashOnCompletion = true;
     [SerializeField] private Color completionColor = new Color32(215, 249, 255, 255);
 
+    [Header("Completion Particles (Optional)")]
+    [Tooltip("Dedicated UI particle graphic. Emits when the animated bar reaches full.")]
+    [SerializeField] private HUDParticleBurst completionBurst;
+
+    [Header("Particle Diagnostics (Optional)")]
+    [Tooltip("Log actual completion emissions to the Console. Disable after testing.")]
+    [SerializeField] private bool logParticleEmissions;
+
     private bool initialized;
     private float displayed;
     private float target;
@@ -61,6 +69,7 @@ public sealed class HUDCycleProgress : MonoBehaviour
         holdingFull = false;
         holdRemaining = 0f;
         RestoreFillColor();
+        if (completionBurst != null) completionBurst.Clear();
         WriteBar(true);
     }
 
@@ -119,6 +128,7 @@ public sealed class HUDCycleProgress : MonoBehaviour
                 holdingFull = true;
                 holdRemaining = Mathf.Max(0f, fullHoldSeconds);
                 StartFlash();
+                EmitCompletionParticles(useUnscaledTime, logParticleEmissions);
                 // Never consume the full hold in this frame: show completion.
             }
             return;
@@ -126,6 +136,39 @@ public sealed class HUDCycleProgress : MonoBehaviour
 
         displayed = Advance(displayed, target, fillSpeed, dt);
         WriteBar();
+    }
+
+    // Inspector component context menu: test the exact assigned emitter and source
+    // without modifying XP, the pending cycle queue, or the bar animation.
+    [ContextMenu("Test Completion Particles (Play Mode)")]
+    private void TestCompletionParticles()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("HUDCycleProgress: Enter Play Mode, then run this test. Do not pause the Editor.", this);
+            return;
+        }
+        EmitCompletionParticles(true, true);
+    }
+
+    private void EmitCompletionParticles(bool unscaled, bool log)
+    {
+        if (completionBurst == null || bar == null)
+        {
+            if (log) Debug.LogWarning("HUDCycleProgress: Missing Completion Burst or Bar reference.", this);
+            return;
+        }
+        if (!completionBurst.isActiveAndEnabled)
+        {
+            if (log) Debug.LogWarning("HUDCycleProgress: Completion Burst is inactive or disabled.", completionBurst);
+            return;
+        }
+        int before = completionBurst.ActiveParticleCount;
+        completionBurst.Emit(bar.rectTransform, unscaled);
+        if (log)
+        {
+            Debug.Log($"HUDCycleProgress: Particle emission requested. Active particles: {before} -> {completionBurst.ActiveParticleCount}; CanvasRenderer.cull (before next canvas rebuild): {completionBurst.canvasRenderer.cull}; emitter rect: {completionBurst.rectTransform.rect}; graphic alpha: {completionBurst.color.a:0.00}; canvas: {(completionBurst.canvas != null ? completionBurst.canvas.name : "NONE")}", completionBurst);
+        }
     }
 
     private void OnDisable()

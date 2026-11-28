@@ -18938,6 +18938,7 @@ GameObject:
   - component: {fileID: 5895606024162874678}
   - component: {fileID: 5895606024162874679}
   - component: {fileID: 5895606024162874677}
+  - component: {fileID: 1563540298599912452}
   m_Layer: 0
   m_Name: XpFountainSpawn
   m_TagString: Untagged
@@ -19013,6 +19014,26 @@ MonoBehaviour:
   enterSound: {fileID: 8300000, guid: 14213a691eda68a4e9ddaaef16e7c276, type: 3}
   p1: {fileID: 2965169821580289503}
   p2: {fileID: 2965169821504285300}
+--- !u!114 &1563540298599912452
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5895606024162874672}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5e3eddbd5db42140ab51babfb625030, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  icon: {fileID: 21300000, guid: 024dd7554a837ae4a9be52105e73f746, type: 3}
+  tint: {r: 0.4392157, g: 0.7882353, b: 0.95686275, a: 1}
+  trackingPoint: {fileID: 5895606024735770416}
+  priority: 40
+  maximumDistance: 0
+  minimumDistance: 0.5
+  hideWhileDriving: 0
+  visibleOnCompass: 1
 --- !u!1 &5895606024171167599
 GameObject:
   m_ObjectHideFlags: 0
@@ -22242,6 +22263,7 @@ MonoBehaviour:
   minIntensity: 0
   maxIntensity: 1.5
   pulseDuration: 3
+  ignoreFog: 0
   enableProximityTransparency: 0
   fadeDistance: 3
   fadeSpeed: 5
